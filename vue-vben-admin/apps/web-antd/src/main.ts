@@ -1,3 +1,8 @@
+// 添加global对象polyfill以解决SockJS浏览器兼容性问题
+if (typeof window !== 'undefined' && typeof window.global === 'undefined') {
+  window.global = window;
+}
+
 import { initPreferences } from '@vben/preferences';
 import { unmountGlobalLoading } from '@vben/utils';
 

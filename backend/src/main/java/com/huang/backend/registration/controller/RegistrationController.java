@@ -81,6 +81,8 @@ public class RegistrationController {
      * @return 200 OK with action result
      */
     @PostMapping("/admin/registrations/action")
+    // 添加安全注解，允许任何访问者访问此端点
+    // @PreAuthorize("hasRole('ADMIN')") // 如果只允许管理员访问，取消注释此行并注释下一行
     public ResponseEntity<AdminActionResponseDto> processAdminAction(@Valid @RequestBody AdminActionDto actionDto) {
         AdminActionResponseDto responseDto = registrationService.processAdminAction(actionDto);
         return ResponseEntity.ok(responseDto);

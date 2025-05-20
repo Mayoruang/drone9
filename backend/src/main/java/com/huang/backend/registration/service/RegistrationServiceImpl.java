@@ -24,6 +24,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.ZonedDateTime;
 import java.util.UUID;
 import java.util.Random;
+import java.util.Optional;
 
 /**
  * Implementation of the RegistrationService
@@ -41,6 +42,16 @@ public class RegistrationServiceImpl implements RegistrationService {
     
     @Value("${application.mqtt.broker-url:tcp://localhost:1883}")
     private String mqttBrokerUrl;
+    
+    // 添加MQTT主题配置
+    @Value("${mqtt.topics.telemetry:drones/+/telemetry}")
+    private String mqttTopicTelemetryPattern;
+    
+    @Value("${mqtt.topics.commands:drones/+/commands}")
+    private String mqttTopicCommandsPattern;
+    
+    @Value("${mqtt.topics.responses:drones/+/responses}")
+    private String mqttTopicResponsesPattern;
 
     @Autowired
     public RegistrationServiceImpl(
@@ -111,41 +122,41 @@ public class RegistrationServiceImpl implements RegistrationService {
         DroneRegistrationRequest request = registrationRepository.findById(requestId)
                 .orElseThrow(() -> new ResourceNotFoundException("Registration request", "id", requestId));
         
-        // Build status-specific message
-        String message;
-        switch (request.getStatus()) {
-            case PENDING_APPROVAL:
-                message = "Your registration request is pending approval from an administrator.";
-                break;
-            case APPROVED:
-                message = "Your registration request has been approved. Your drone ID is " + request.getDroneId() + ".";
-                break;
-            case REJECTED:
-                message = "Your registration request has been rejected.";
-                break;
-            default:
-                message = "Current status: " + request.getStatus();
-                break;
-        }
-        
-        // Create builder for response DTO
-        RegistrationStatusResponseDto.RegistrationStatusResponseDtoBuilder responseBuilder = 
-            RegistrationStatusResponseDto.builder()
+        // Build response with basic fields
+        RegistrationStatusResponseDto.RegistrationStatusResponseDtoBuilder responseBuilder = RegistrationStatusResponseDto.builder()
                 .requestId(request.getRequestId())
                 .serialNumber(request.getSerialNumber())
                 .model(request.getModel())
                 .status(request.getStatus())
                 .requestedAt(request.getRequestedAt())
-                .processedAt(request.getProcessedAt())
-                .droneId(request.getDroneId())
-                .message(message);
+                .processedAt(request.getProcessedAt());
         
-        // Add MQTT credentials if request is approved
+        // Add message based on status
+        String message;
+        switch (request.getStatus()) {
+            case PENDING_APPROVAL:
+                message = "您的注册请求已收到，正在等待管理员审批。请稍后检查状态。";
+                break;
+            case APPROVED:
+                message = "您的注册请求已批准。请使用提供的MQTT凭证连接到服务器。";
+                break;
+            case REJECTED:
+                message = "很抱歉，您的注册请求被拒绝" + (request.getAdminNotes() != null ? "，原因: " + request.getAdminNotes() : "。");
+                break;
+            default:
+                message = "未知状态: " + request.getStatus();
+                break;
+        }
+        responseBuilder.message(message);
+        
+        // If approved, check for drone record and add credentials
         if (request.getStatus() == DroneRegistrationRequest.RegistrationStatus.APPROVED && request.getDroneId() != null) {
-            Drone drone = droneRepository.findByRegistrationRequestId(request.getRequestId())
-                    .orElseThrow(() -> new ResourceNotFoundException("Drone", "registrationRequestId", request.getRequestId()));
+            Optional<Drone> droneOpt = droneRepository.findById(request.getDroneId());
+            if (droneOpt.isPresent()) {
+                Drone drone = droneOpt.get();
+                responseBuilder.droneId(drone.getDroneId());
             
-            // We need to regenerate the password since we don't store it in plaintext
+                // Generate a temporary MQTT password for the client
             String mqttPassword = generateRandomPassword(12);
             
             // In a real production system, we would need a more secure way to handle passwords
@@ -165,6 +176,7 @@ public class RegistrationServiceImpl implements RegistrationService {
             // Update password hash in database with new password
             drone.setMqttPasswordHash(passwordEncoder.encode(mqttPassword));
             droneRepository.save(drone);
+            }
         }
         
         // Build and return the response DTO
@@ -184,9 +196,11 @@ public class RegistrationServiceImpl implements RegistrationService {
         // 根据状态过滤查询
         Page<DroneRegistrationRequest> requests;
         if (status != null) {
+            // Explicit filter requested by caller
             requests = registrationRepository.findByStatus(status, pageable);
         } else {
-            requests = registrationRepository.findAll(pageable);
+            // Default: exclude DELETED records so UI does not show removed drones
+            requests = registrationRepository.findByStatusNot(DroneRegistrationRequest.RegistrationStatus.DELETED, pageable);
         }
         
         // 转换为DTO
@@ -299,10 +313,10 @@ public class RegistrationServiceImpl implements RegistrationService {
         String mqttPassword = generateRandomPassword(12);
         String passwordHash = passwordEncoder.encode(mqttPassword);
         
-        // Create MQTT topics
-        String topicBase = "drones/" + droneId.toString();
-        String telemetryTopic = topicBase + "/telemetry";
-        String commandsTopic = topicBase + "/commands";
+        // Create MQTT topics based on patterns
+        String droneIdentifier = request.getSerialNumber(); // 使用序列号作为唯一标识
+        String telemetryTopic = mqttTopicTelemetryPattern.replace("+", droneIdentifier);
+        String commandsTopic = mqttTopicCommandsPattern.replace("+", droneIdentifier);
         
         // Create new drone
         Drone drone = Drone.builder()
@@ -318,7 +332,7 @@ public class RegistrationServiceImpl implements RegistrationService {
                 .mqttTopicCommands(commandsTopic)
                 .createdAt(ZonedDateTime.now())
                 .updatedAt(ZonedDateTime.now())
-                .currentStatus(Drone.DroneStatus.OFFLINE)
+                .currentStatus(Drone.DroneStatus.IDLE)
                 .build();
         
         // Save the drone

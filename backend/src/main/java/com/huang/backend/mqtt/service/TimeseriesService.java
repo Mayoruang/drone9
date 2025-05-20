@@ -1,5 +1,6 @@
 package com.huang.backend.mqtt.service;
 
+import com.huang.backend.drone.model.TelemetryData;
 import com.huang.backend.mqtt.model.DroneTelemetryData;
 import com.influxdb.client.InfluxDBClient;
 import com.influxdb.client.WriteApi;
@@ -38,7 +39,7 @@ public class TimeseriesService {
      *
      * @param data the telemetry data to write
      */
-    public void writeTelemetryDataUsingPoint(DroneTelemetryData data) {
+    public void writeTelemetryDataUsingPoint(TelemetryData data) {
         try {
             Point point = Point.measurement(MEASUREMENT)
                     .time(data.getTimestamp(), WritePrecision.NS)
@@ -72,7 +73,7 @@ public class TimeseriesService {
      *
      * @param data the telemetry data to write
      */
-    public void writeTelemetryData(DroneTelemetryData data) {
+    public void writeTelemetryData(TelemetryData data) {
         try {
             // Start building the line protocol string
             StringBuilder sb = new StringBuilder();

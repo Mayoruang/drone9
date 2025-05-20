@@ -1,83 +1,30 @@
 package com.huang.backend.mqtt.model;
 
-import lombok.AllArgsConstructor;
-import lombok.Builder;
+import com.huang.backend.drone.model.TelemetryData;
 import lombok.Data;
-import lombok.NoArgsConstructor;
-
-import java.time.Instant;
+import lombok.experimental.SuperBuilder;
 
 /**
- * Model class for drone telemetry data received via MQTT
+ * Model class for drone telemetry data received via MQTT.
+ * Extends the common TelemetryData model.
  */
 @Data
-@Builder
-@NoArgsConstructor
-@AllArgsConstructor
-public class DroneTelemetryData {
+@SuperBuilder
+public class DroneTelemetryData extends TelemetryData {
     
     /**
-     * Drone identifier (typically the serial number)
+     * Any MQTT-specific telemetry fields can be added here
      */
-    private String droneId;
     
     /**
-     * Timestamp of when the data was recorded on the drone
+     * The MQTT topic from which this data was received
      */
-    private Instant timestamp;
+    private String sourceTopic;
     
     /**
-     * Battery level in percentage (0-100)
+     * Default constructor needed for Jackson deserialization
      */
-    private Double batteryLevel;
-    
-    /**
-     * Battery voltage in volts
-     */
-    private Double batteryVoltage;
-    
-    /**
-     * Current latitude position
-     */
-    private Double latitude;
-    
-    /**
-     * Current longitude position
-     */
-    private Double longitude;
-    
-    /**
-     * Altitude in meters
-     */
-    private Double altitude;
-    
-    /**
-     * Speed in meters per second
-     */
-    private Double speed;
-    
-    /**
-     * Heading/direction in degrees (0-359)
-     */
-    private Double heading;
-    
-    /**
-     * Satellite count used for GPS fix
-     */
-    private Integer satellites;
-    
-    /**
-     * Signal strength in percentage (0-100)
-     */
-    private Double signalStrength;
-    
-    /**
-     * Flight mode (e.g., HOVER, RTL, MISSION)
-     */
-    private String flightMode;
-    
-    /**
-     * Temperature of the drone in Celsius
-     */
-    private Double temperature;
+    public DroneTelemetryData() {
+        super();
+    }
 } 

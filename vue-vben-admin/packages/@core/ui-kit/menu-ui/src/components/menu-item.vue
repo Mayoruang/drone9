@@ -6,7 +6,7 @@ import { computed, onBeforeUnmount, onMounted, reactive, useSlots } from 'vue';
 import { useNamespace } from '@vben-core/composables';
 import { VbenIcon, VbenTooltip } from '@vben-core/shadcn-ui';
 
-import { MenuBadge } from '.';
+import { MenuBadge } from '../components';
 import { useMenu, useMenuContext, useSubMenuContext } from '../hooks';
 
 interface Props extends MenuItemProps {}

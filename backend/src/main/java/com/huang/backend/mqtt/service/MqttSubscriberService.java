@@ -3,8 +3,11 @@ package com.huang.backend.mqtt.service;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.huang.backend.drone.entity.Drone;
 import com.huang.backend.drone.repository.DroneRepository;
+import com.huang.backend.drone.websocket.DroneWebSocketHandler;
 import com.huang.backend.mqtt.model.CommandResponse;
 import com.huang.backend.mqtt.model.DroneTelemetryData;
+import com.huang.backend.mqtt.model.FarewellMessage;
+import com.huang.backend.drone.dto.DroneTelemetryDto;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.eclipse.paho.client.mqttv3.*;
@@ -34,6 +37,7 @@ public class MqttSubscriberService implements MqttCallback {
     private final TimeseriesService timeseriesService;
     private final DroneRepository droneRepository;
     private final ObjectMapper objectMapper;
+    private final DroneWebSocketHandler droneWebSocketHandler;
 
     @Value("${mqtt.topics.telemetry:drones/+/telemetry}")
     private String telemetryTopic;
@@ -172,7 +176,14 @@ public class MqttSubscriberService implements MqttCallback {
             return;
         }
         
-        // Parse JSON payload
+        // Check for farewell message by inspecting the payload first
+        String messageStr = new String(message.getPayload());
+        if (messageStr.contains("\"type\":\"FAREWELL\"") || messageStr.contains("\"type\": \"FAREWELL\"")) {
+            handleFarewellMessage(droneId, message);
+            return;
+        }
+        
+        // Parse JSON payload for normal telemetry
         DroneTelemetryData telemetryData = objectMapper.readValue(message.getPayload(), DroneTelemetryData.class);
         
         // Set drone ID from topic if not present in payload
@@ -190,6 +201,9 @@ public class MqttSubscriberService implements MqttCallback {
         
         // Update drone's last heartbeat timestamp in PostgreSQL
         updateDroneHeartbeat(droneId);
+        
+        // 将遥测数据推送到WebSocket
+        sendTelemetryToWebSocket(droneId, telemetryData);
     }
     
     private void handleResponseMessage(String topic, MqttMessage message) throws Exception {
@@ -247,6 +261,120 @@ public class MqttSubscriberService implements MqttCallback {
             }
         } catch (Exception e) {
             log.error("更新无人机心跳时间失败: {}", e.getMessage(), e);
+        }
+    }
+
+    /**
+     * 将遥测数据转换并推送到WebSocket
+     * 
+     * @param droneId 无人机ID
+     * @param telemetryData 遥测数据
+     */
+    private void sendTelemetryToWebSocket(String droneId, DroneTelemetryData telemetryData) {
+        try {
+            // 查找无人机记录获取UUID
+            Optional<Drone> droneOpt = droneRepository.findBySerialNumber(droneId);
+            if (droneOpt.isPresent()) {
+                Drone drone = droneOpt.get();
+                
+                // 转换为DroneTelemetryDto
+                DroneTelemetryDto dto = DroneTelemetryDto.builder()
+                    .droneId(droneId)
+                    .timestamp(telemetryData.getTimestamp())
+                    .batteryLevel(telemetryData.getBatteryLevel())
+                    .batteryVoltage(telemetryData.getBatteryVoltage())
+                    .latitude(telemetryData.getLatitude())
+                    .longitude(telemetryData.getLongitude())
+                    .altitude(telemetryData.getAltitude())
+                    .speed(telemetryData.getSpeed())
+                    .heading(telemetryData.getHeading())
+                    .satellites(telemetryData.getSatellites())
+                    .signalStrength(telemetryData.getSignalStrength())
+                    .flightMode(telemetryData.getFlightMode())
+                    .temperature(telemetryData.getTemperature())
+                    .status(telemetryData.getStatus())
+                    .build();
+                
+                // 如果遥测中有status字段，更新无人机状态
+                if (telemetryData.getStatus() != null) {
+                    try {
+                        Drone.DroneStatus newStatus = Drone.DroneStatus.valueOf(telemetryData.getStatus());
+                        if (drone.getCurrentStatus() != newStatus) {
+                            drone.setCurrentStatus(newStatus);
+                            droneRepository.save(drone);
+                            log.info("根据遥测数据更新无人机{}状态为: {}", droneId, newStatus);
+                        }
+                    } catch (IllegalArgumentException e) {
+                        log.warn("无人机{}发送了无效的状态值: {}", droneId, telemetryData.getStatus());
+                    }
+                }
+                
+                // 通过WebSocket处理器发送更新
+                droneWebSocketHandler.sendDroneUpdate(drone.getDroneId(), dto);
+            }
+        } catch (Exception e) {
+            log.error("发送遥测数据到WebSocket失败: {}", e.getMessage(), e);
+        }
+    }
+
+    /**
+     * Handle a farewell message from a drone before it goes offline
+     * 
+     * @param droneId the ID of the drone
+     * @param message the MQTT message
+     */
+    private void handleFarewellMessage(String droneId, MqttMessage message) {
+        try {
+            // Parse the farewell message
+            FarewellMessage farewell = objectMapper.readValue(message.getPayload(), FarewellMessage.class);
+            
+            log.info("收到无人机{}的告别消息: {}", droneId, farewell.getMessage());
+            
+            // Find the drone in the database
+            Optional<Drone> droneOpt = droneRepository.findBySerialNumber(droneId);
+            if (droneOpt.isPresent()) {
+                Drone drone = droneOpt.get();
+                
+                // Store the farewell message
+                drone.setLastFarewellMessage(farewell.getMessage());
+                
+                // Update the drone's status to OFFLINE if not already
+                if (drone.getCurrentStatus() != Drone.DroneStatus.OFFLINE) {
+                    ZonedDateTime now = ZonedDateTime.ofInstant(
+                        farewell.getTimestamp() != null ? farewell.getTimestamp() : Instant.now(), 
+                        ZoneId.systemDefault());
+                    
+                    drone.setCurrentStatus(Drone.DroneStatus.OFFLINE);
+                    drone.setOfflineAt(now);
+                    
+                    if (drone.getOfflineReason() == null) {
+                        drone.setOfflineReason("Drone initiated shutdown: " + farewell.getMessage());
+                    }
+                    
+                    if (farewell.getIssuedBy() != null && drone.getOfflineBy() == null) {
+                        drone.setOfflineBy(farewell.getIssuedBy());
+                    }
+                    
+                    log.info("更新无人机{}状态为离线", droneId);
+                }
+                
+                // Save the updated drone
+                droneRepository.save(drone);
+                
+                // Create a telemetry DTO for the farewell message
+                DroneTelemetryDto dto = DroneTelemetryDto.builder()
+                    .droneId(droneId)
+                    .timestamp(farewell.getTimestamp())
+                    .batteryLevel(farewell.getBatteryRemaining())
+                    .build();
+                
+                // Send a WebSocket message to notify clients
+                droneWebSocketHandler.sendDroneUpdate(drone.getDroneId(), dto);
+            } else {
+                log.warn("收到未知无人机{}的告别消息", droneId);
+            }
+        } catch (Exception e) {
+            log.error("处理无人机告别消息失败: {}", e.getMessage(), e);
         }
     }
 } 

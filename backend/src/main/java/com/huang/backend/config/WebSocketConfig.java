@@ -17,12 +17,12 @@ public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
      * Configure the message broker for WebSocket communication
      */
     @Override
-    public void configureMessageBroker(MessageBrokerRegistry registry) {
+    public void configureMessageBroker(MessageBrokerRegistry config) {
         // Set prefix for messages from server to client
-        registry.enableSimpleBroker("/topic");
-        
+        config.enableSimpleBroker("/topic");
+
         // Set prefix for messages from clients to server
-        registry.setApplicationDestinationPrefixes("/app");
+        config.setApplicationDestinationPrefixes("/app");
     }
 
     /**
@@ -34,5 +34,12 @@ public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
         registry.addEndpoint("/ws/admin")
                 .setAllowedOriginPatterns("*") // In production, restrict this
                 .withSockJS(); // Provides fallback options if WebSocket is not available
+
+        // Register the endpoint for drone position data
+        registry.addEndpoint("/ws/drones")
+                .setAllowedOriginPatterns("*")  // Using patterns instead of specific origins
+                .withSockJS()
+                .setClientLibraryUrl("https://cdn.jsdelivr.net/npm/sockjs-client@1/dist/sockjs.min.js")
+                .setSessionCookieNeeded(false);
     }
-} 
+}

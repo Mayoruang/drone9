@@ -7,7 +7,7 @@ import org.springframework.stereotype.Controller;
 /**
  * Controller for handling WebSocket messages
  */
-@Controller
+@Controller("registrationWebSocketController")
 public class WebSocketController {
 
     /**
@@ -16,8 +16,8 @@ public class WebSocketController {
      * @param message the message to echo
      * @return the echo response
      */
-    @MessageMapping("/echo")
-    @SendTo("/topic/echo")
+    @MessageMapping("/registration/echo")
+    @SendTo("/topic/registration/echo")
     public String echo(String message) {
         return "[Server] Echo: " + message;
     }

@@ -32,6 +32,11 @@ public interface DroneRegistrationRequestRepository extends JpaRepository<DroneR
     Page<DroneRegistrationRequest> findByStatus(DroneRegistrationRequest.RegistrationStatus status, Pageable pageable);
     
     /**
+     * Find requests whose status is not the given status (used to exclude DELETED by default).
+     */
+    Page<DroneRegistrationRequest> findByStatusNot(DroneRegistrationRequest.RegistrationStatus status, Pageable pageable);
+    
+    /**
      * Check if a request with the given serial number exists
      */
     boolean existsBySerialNumber(String serialNumber);

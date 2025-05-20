@@ -52,29 +52,32 @@ services:
     restart: unless-stopped
 
   # Spring Boot 后端 - 开发模式（使用本地代码）
-  backend:
-    build:
-      context: ./backend
-      dockerfile: Dockerfile.dev
-    container_name: drone-backend
-    depends_on:
-      - postgres
-      - influxdb
-      - emqx
-    ports:
-      - "8080:8080"
-    volumes:
-      - ./backend:/app
-    environment:
-      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/dronedb
-      SPRING_DATASOURCE_USERNAME: drone
-      SPRING_DATASOURCE_PASSWORD: dronepassword
-      INFLUXDB_URL: http://influxdb:8086
-      INFLUXDB_TOKEN: my-super-secret-token
-      INFLUXDB_ORG: drone_org
-      INFLUXDB_BUCKET: drone_data
-      MQTT_BROKER_URL: tcp://emqx:1883
-    restart: unless-stopped
+  # backend:
+  #   build:
+  #     context: ./backend
+  #     dockerfile: Dockerfile.dev
+  #   container_name: drone-backend
+  #   depends_on:
+  #     - postgres
+  #     - influxdb
+  #     - emqx
+  #   ports:
+  #     - "8080:8080"
+  #   volumes:
+  #     - ./backend:/app
+  #   environment:
+  #     SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/dronedb
+  #     SPRING_DATASOURCE_USERNAME: drone
+  #     SPRING_DATASOURCE_PASSWORD: dronepassword
+  #     INFLUXDB_URL: http://influxdb:8086
+  #     INFLUXDB_TOKEN: my-super-secret-token
+  #     INFLUXDB_ORG: drone_org
+  #     INFLUXDB_BUCKET: drone_data
+  #     MQTT_BROKER_URL: tcp://emqx:1883
+  #     MQTT_TOPICS_TELEMETRY: drones/+/telemetry
+  #     MQTT_TOPICS_COMMANDS: drones/+/commands
+  #     MQTT_TOPICS_RESPONSES: drones/+/responses
+  #   restart: unless-stopped
     # 开发模式，不直接启动，仅提供环境
 
 volumes:

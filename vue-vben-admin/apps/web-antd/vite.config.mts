@@ -13,6 +13,11 @@ export default defineConfig(async () => {
             target: 'http://localhost:8080/api',
             ws: true,
           },
+          '/ws': {
+            changeOrigin: true,
+            target: 'ws://localhost:8080',
+            ws: true,
+          },
         },
       },
     },

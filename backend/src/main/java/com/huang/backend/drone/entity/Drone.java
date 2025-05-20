@@ -59,6 +59,18 @@ public class Drone {
     @Enumerated(EnumType.STRING)
     private DroneStatus currentStatus;
 
+    @Column(name = "offline_reason")
+    private String offlineReason;
+
+    @Column(name = "offline_at")
+    private ZonedDateTime offlineAt;
+
+    @Column(name = "offline_by")
+    private String offlineBy;
+
+    @Column(name = "last_farewell_message")
+    private String lastFarewellMessage;
+
     @Column(name = "created_at", nullable = false)
     private ZonedDateTime createdAt;
 

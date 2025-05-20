@@ -36,7 +36,7 @@ application:
       refresh-token-cookie-name: vben_refresh_token
   # CORS配置
   cors:
-    allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:3000,http://localhost:3100,http://localhost:3200,http://localhost:5666,http://localhost:5777}
+    allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:3000,http://localhost:3100,http://localhost:3200,http://localhost:5666,http://localhost:5667,http://localhost:5777}
     allowed-methods: ${CORS_ALLOWED_METHODS:GET,POST,PUT,DELETE,OPTIONS}
     allowed-headers: ${CORS_ALLOWED_HEADERS:Authorization,Content-Type,X-Requested-With,Accept}
     max-age: ${CORS_MAX_AGE:3600}
@@ -85,5 +85,6 @@ management:
 logging:
   level:
     com.huang: ${LOGGING_LEVEL_COM_HUANG:INFO}
+    com.huang.backend.drone.service.DroneInfluxDBService: ERROR
     org.eclipse.paho: ${LOGGING_LEVEL_PAHO:INFO}
     org.springframework.web: INFO 

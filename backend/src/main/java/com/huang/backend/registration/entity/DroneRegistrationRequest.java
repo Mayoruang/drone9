@@ -54,7 +54,8 @@ public class DroneRegistrationRequest {
     public enum RegistrationStatus {
         PENDING_APPROVAL,
         APPROVED,
-        REJECTED
+        REJECTED,
+        DELETED
     }
     
     /**
