@@ -11,8 +11,36 @@ const routes: RouteRecordRaw[] = [
     },
     name: 'Dashboard',
     path: '/dashboard',
-    redirect: '/drone-registration',
     children: [
+      {
+        name: 'Analytics',
+        path: '/analytics',
+        component: () => import('#/views/dashboard/analytics/index.vue'),
+        meta: {
+          affixTab: true,
+          icon: 'lucide:area-chart',
+          title: $t('page.dashboard.analytics'),
+        },
+      },
+      {
+        name: 'Workspace',
+        path: '/workspace',
+        component: () => import('#/views/dashboard/workspace/index.vue'),
+        meta: {
+          icon: 'carbon:workspace',
+          title: $t('page.dashboard.workspace'),
+        },
+      },
+      {
+        name: 'DroneMonitor',
+        path: '/drone-monitor',
+        component: () => import('#/views/dashboard/drone-monitor/index.vue'),
+        meta: {
+          icon: 'mdi:drone',
+          title: '无人机监控中心',
+          order: 1
+        },
+      },
       {
         name: 'DroneRegistration',
         path: '/drone-registration',
@@ -31,16 +59,6 @@ const routes: RouteRecordRaw[] = [
           icon: 'lucide:activity-square',
           title: '无人机状态监控',
           order: 3
-        },
-      },
-      {
-        name: 'Geofence',
-        path: '/geofence',
-        component: () => import('#/views/dashboard/geofence/index.vue'),
-        meta: {
-          icon: 'mdi:map-marker-radius',
-          title: '地理围栏管理',
-          order: 4
         },
       },
     ],
