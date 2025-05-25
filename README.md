@@ -1,4 +1,4 @@
-# 🚁 Drone9 - 先进无人机管理系统
+# 🚁 Drone9 - 无人机管理系统
 
 [![GitHub license](https://img.shields.io/github/license/Mayoruang/drone9)](https://github.com/Mayoruang/drone9/blob/main/LICENSE)
 [![Build Status](https://img.shields.io/badge/build-passing-brightgreen)](#)
