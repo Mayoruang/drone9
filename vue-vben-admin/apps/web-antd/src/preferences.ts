@@ -8,7 +8,20 @@ import { defineOverridesPreferences } from '@vben/preferences';
 export const overridesPreferences = defineOverridesPreferences({
   // overrides
   app: {
-    name: import.meta.env.VITE_APP_TITLE,
+    name: 'Drone9 无人机管理系统',
     defaultHomePath: '/drone-registration',
+  },
+  logo: {
+    enable: true,
+    source: '/drone-icon.svg', // 使用无人机图标
+  },
+  copyright: {
+    companyName: 'Drone9 Team',
+    companySiteLink: 'https://github.com/drone9',
+    date: '2024',
+    enable: true,
+    icp: '',
+    icpLink: '',
+    settingShow: true,
   },
 });

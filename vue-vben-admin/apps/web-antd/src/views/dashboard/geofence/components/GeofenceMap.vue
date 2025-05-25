@@ -14,7 +14,7 @@ import {
 interface GeofenceData {
   id: string;
   name: string;
-  type: 'FLY_ZONE' | 'NO_FLY_ZONE';
+  type: 'FLY_ZONE' | 'NO_FLY_ZONE' | 'RESTRICTED_ZONE';
   coordinates: Array<{ lat: number; lng: number }>;
   description?: string;
   createTime: string;
@@ -94,6 +94,13 @@ const geofenceStyles = {
     strokeWeight: 2,
     strokeOpacity: 0.8,
     fillColor: '#52c41a',
+    fillOpacity: 0.2,
+  },
+  RESTRICTED_ZONE: {
+    strokeColor: '#faad14',
+    strokeWeight: 2,
+    strokeOpacity: 0.8,
+    fillColor: '#faad14',
     fillOpacity: 0.2,
   },
 };
@@ -205,11 +212,11 @@ const renderGeofences = () => {
     // 添加信息窗口
     const infoWindow = new BMap.InfoWindow(`
       <div style="padding: 8px;">
-        <h4 style="margin: 0 0 8px 0; color: ${geofence.type === 'NO_FLY_ZONE' ? '#ff4d4f' : '#52c41a'};">
+        <h4 style="margin: 0 0 8px 0; color: ${geofence.type === 'NO_FLY_ZONE' ? '#ff4d4f' : geofence.type === 'RESTRICTED_ZONE' ? '#ffa500' : '#52c41a'};">
           ${geofence.name}
         </h4>
         <p style="margin: 0; font-size: 12px; color: #666;">
-          类型: ${geofence.type === 'NO_FLY_ZONE' ? '禁飞区' : '允飞区'}
+          类型: ${geofence.type === 'NO_FLY_ZONE' ? '禁飞区' : geofence.type === 'RESTRICTED_ZONE' ? '限制区' : '允飞区'}
         </p>
         <p style="margin: 4px 0 0 0; font-size: 12px; color: #666;">
           ${geofence.description || '无描述'}

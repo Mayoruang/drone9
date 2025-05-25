@@ -14,19 +14,24 @@ import {
   Space,
 } from 'ant-design-vue';
 
+import {
+  getAllGeofences,
+  createGeofence,
+  deleteGeofence as deleteGeofenceApi,
+  testGeofenceAPI,
+  type GeofenceData
+} from '#/api/geofence';
+import { requestClient, baseRequestClient } from '#/api/request';
+
 import GeofenceList from './components/GeofenceList.vue';
 import GeofenceMap from './components/GeofenceMap.vue';
 
-// 地理围栏类型定义
-interface GeofenceData {
-  id: string;
-  name: string;
-  type: 'FLY_ZONE' | 'NO_FLY_ZONE'; // 禁飞区或允飞区
-  coordinates: Array<{ lat: number; lng: number }>;
-  description?: string;
-  createTime: string;
-  thumbnail?: string; // 缩略图
-  droneIds?: string[]; // 关联的无人机ID列表
+// 扩展地理围栏数据类型以包含额外字段
+interface ExtendedGeofenceData extends GeofenceData {
+  altitudeMin?: number;
+  altitudeMax?: number;
+  priority?: number;
+  areaSquareMeters?: number;
 }
 
 // 无人机数据类型（用于关联选择）
@@ -42,48 +47,22 @@ const mapRef = ref<any>(null);
 const isDrawing = ref(false);
 const showGeofenceModal = ref(false);
 const editingGeofence = ref<GeofenceData | null>(null);
+const apiConnected = ref(false);
 
 // 表单数据
 const geofenceForm = reactive({
   name: '',
-  type: 'NO_FLY_ZONE' as 'FLY_ZONE' | 'NO_FLY_ZONE',
+  type: 'NO_FLY_ZONE' as 'FLY_ZONE' | 'NO_FLY_ZONE' | 'RESTRICTED_ZONE',
   description: '',
   droneIds: [] as string[],
+  altitudeMin: undefined as number | undefined,
+  altitudeMax: undefined as number | undefined,
 });
 
-// Mock数据 - 地理围栏列表
-const geofenceList = ref<GeofenceData[]>([
-  {
-    id: '1',
-    name: '沈阳浑南禁飞区',
-    type: 'NO_FLY_ZONE',
-    coordinates: [
-      { lng: 123.44, lat: 41.72 },
-      { lng: 123.46, lat: 41.72 },
-      { lng: 123.46, lat: 41.74 },
-      { lng: 123.44, lat: 41.74 },
-    ],
-    description: '沈阳浑南新区核心区域，禁止无人机飞行',
-    createTime: '2024-01-15 10:30:00',
-    droneIds: ['drone001', 'drone002'],
-  },
-  {
-    id: '2',
-    name: '机场周边允飞区',
-    type: 'FLY_ZONE',
-    coordinates: [
-      { lng: 123.4, lat: 41.7 },
-      { lng: 123.42, lat: 41.7 },
-      { lng: 123.42, lat: 41.72 },
-      { lng: 123.4, lat: 41.72 },
-    ],
-    description: '指定的无人机飞行训练区域',
-    createTime: '2024-01-16 14:20:00',
-    droneIds: ['drone003'],
-  },
-]);
+// 地理围栏列表 - 现在从API获取
+const geofenceList = ref<ExtendedGeofenceData[]>([]);
 
-// Mock数据 - 无人机列表
+// Mock数据 - 无人机列表（暂时保留，后续可从无人机API获取）
 const droneList = ref<DroneData[]>([
   { id: 'drone001', serialNumber: 'DJI001', name: '大疆 Mavic Air 2' },
   { id: 'drone002', serialNumber: 'DJI002', name: '大疆 Mini 3 Pro' },
@@ -91,6 +70,133 @@ const droneList = ref<DroneData[]>([
   { id: 'drone004', serialNumber: 'AUTEL001', name: 'Autel EVO II' },
   { id: 'drone005', serialNumber: 'YUNEEC001', name: 'Yuneec Typhoon H' },
 ]);
+
+// 从API加载地理围栏数据
+const loadGeofences = async () => {
+  try {
+    loading.value = true;
+
+    // 使用baseRequestClient获取完整响应
+    const response = await baseRequestClient.get('/v1/geofences', {
+      params: {
+        page: 0,
+        size: 1000,
+      }
+    });
+
+    console.log('API Response:', response);
+
+    // 检查响应格式 - baseRequestClient返回完整的axios响应
+    if (response.data && response.data.content && Array.isArray(response.data.content)) {
+      // 转换数据格式
+      geofenceList.value = response.data.content.map((item: any) => {
+        // 从geometry中提取实际的多边形坐标
+        let coordinates: Array<{ lat: number; lng: number }> = [];
+
+        if (item.geometry && item.geometry.type === 'Polygon' && item.geometry.coordinates) {
+          // GeoJSON Polygon格式: [[[lng, lat], [lng, lat], ...]]
+          const ringCoordinates = item.geometry.coordinates[0]; // 外环坐标
+          coordinates = ringCoordinates.map((coord: [number, number]) => ({
+            lng: coord[0], // 经度
+            lat: coord[1], // 纬度
+          }));
+        } else if (item.center && Array.isArray(item.center) && item.center.length === 2) {
+          // 备用方案：如果没有geometry，从center点生成基本的方形坐标
+          const [lng, lat] = item.center;
+          const offset = 0.002; // 约200米的偏移
+          coordinates = [
+            { lat: lat + offset, lng: lng - offset },
+            { lat: lat + offset, lng: lng + offset },
+            { lat: lat - offset, lng: lng + offset },
+            { lat: lat - offset, lng: lng - offset },
+          ];
+        }
+
+        return {
+          id: item.geofenceId || item.id,
+          name: item.name,
+          type: item.geofenceType || 'NO_FLY_ZONE', // 使用后端返回的实际类型
+          coordinates, // 使用实际的多边形坐标
+          description: item.description,
+          createTime: item.createdAt || item.createTime,
+          thumbnail: item.thumbnailUrl || item.thumbnail,
+          droneIds: [],
+          active: item.active,
+          // 新增字段
+          altitudeMin: item.altitudeMin,
+          altitudeMax: item.altitudeMax,
+          priority: item.priority,
+          areaSquareMeters: item.areaSquareMeters,
+        };
+      });
+
+      console.log('Loaded geofences with actual geometry:', geofenceList.value);
+
+      notification.success({
+        message: '加载成功',
+        description: `成功加载 ${geofenceList.value.length} 个地理围栏`,
+      });
+    } else {
+      // 如果没有数据，设置为空数组
+      geofenceList.value = [];
+      console.log('No geofences found or unexpected response format');
+    }
+
+  } catch (error: any) {
+    console.error('Failed to load geofences:', error);
+
+    // 设置为空数组，避免页面崩溃
+    geofenceList.value = [];
+
+    // 根据错误类型显示不同的提示
+    if (error.response?.status === 500) {
+      notification.warning({
+        message: '服务器错误',
+        description: '地理围栏服务暂时不可用，显示空列表。这可能是因为数据库中还没有地理围栏数据。',
+      });
+    } else if (error.response?.status === 403) {
+      notification.error({
+        message: '权限不足',
+        description: '没有权限访问地理围栏数据，请联系管理员',
+      });
+    } else {
+      notification.error({
+        message: '加载失败',
+        description: '无法从服务器获取地理围栏数据，请检查网络连接或稍后重试',
+      });
+    }
+  } finally {
+    loading.value = false;
+  }
+};
+
+// 测试API连接
+const testApiConnection = async () => {
+  try {
+    const response = await baseRequestClient.get('/v1/geofences/test');
+    const isConnected = response.data && typeof response.data === 'string' && response.data.includes('working');
+    apiConnected.value = isConnected;
+
+    if (isConnected) {
+      notification.success({
+        message: 'API连接成功',
+        description: '地理围栏服务连接正常',
+      });
+    } else {
+      notification.warning({
+        message: 'API连接异常',
+        description: '地理围栏服务连接不稳定，部分功能可能受影响',
+      });
+    }
+  } catch (error) {
+    console.error('API connection test failed:', error);
+    apiConnected.value = false;
+    notification.error({
+      message: 'API连接失败',
+      description: '无法连接到地理围栏服务，请检查服务状态',
+    });
+  }
+};
 
 // 开始绘制地理围栏
 const startDrawing = () => {
@@ -131,6 +237,8 @@ const onDrawComplete = (coordinates: Array<{ lat: number; lng: number }>) => {
     type: 'NO_FLY_ZONE',
     description: '',
     droneIds: [],
+    altitudeMin: undefined,
+    altitudeMax: undefined,
   });
 
   // 临时存储坐标
@@ -153,8 +261,8 @@ const cancelDrawing = () => {
   });
 };
 
-// 保存地理围栏
-const saveGeofence = () => {
+// 保存地理围栏 - 使用真实API
+const saveGeofence = async () => {
   if (!geofenceForm.name.trim()) {
     notification.error({
       message: '请输入地理围栏名称',
@@ -169,28 +277,117 @@ const saveGeofence = () => {
     return;
   }
 
-  const newGeofence: GeofenceData = {
-    ...editingGeofence.value,
-    id: Date.now().toString(),
-    name: geofenceForm.name,
-    type: geofenceForm.type,
-    description: geofenceForm.description,
-    createTime: new Date().toLocaleString(),
-    droneIds: geofenceForm.droneIds,
-  };
+  try {
+    loading.value = true;
 
-  geofenceList.value.unshift(newGeofence);
+    const createData = {
+      name: geofenceForm.name,
+      type: geofenceForm.type,
+      coordinates: editingGeofence.value.coordinates,
+      description: geofenceForm.description,
+      droneIds: geofenceForm.droneIds,
+      altitudeMin: geofenceForm.altitudeMin,
+      altitudeMax: geofenceForm.altitudeMax,
+    };
 
-  // 在地图上添加围栏
-  mapRef.value?.addGeofence(newGeofence);
+    console.log('Creating geofence with data:', createData);
+    const response = await createGeofence(createData);
+    console.log('Create geofence response:', response);
 
-  notification.success({
-    message: '地理围栏创建成功',
-    description: `${newGeofence.name} 已添加到系统`,
-  });
+    // 检查响应是否成功（response已经是解包后的数据）
+    if (response && response.success) {
+      // 显示成功通知
+      notification.success({
+        message: '地理围栏创建成功',
+        description: `${geofenceForm.name} 已添加到系统`,
+      });
 
-  showGeofenceModal.value = false;
-  editingGeofence.value = null;
+      // 关闭模态框和重置状态
+      showGeofenceModal.value = false;
+      editingGeofence.value = null;
+
+      // 构建新的地理围栏对象并立即添加到列表和地图
+      const newGeofence = {
+        id: response.geofenceId || '', // 确保有默认值
+        name: geofenceForm.name,
+        type: geofenceForm.type,
+        coordinates: createData.coordinates,
+        description: geofenceForm.description,
+        createTime: new Date().toISOString(),
+        thumbnail: undefined, // 缩略图将稍后异步生成
+        droneIds: geofenceForm.droneIds || [],
+        active: true,
+        altitudeMin: geofenceForm.altitudeMin,
+        altitudeMax: geofenceForm.altitudeMax,
+        priority: 1,
+        areaSquareMeters: undefined,
+      };
+
+      // 立即添加到列表
+      geofenceList.value.push(newGeofence);
+
+      // 立即在地图上显示新围栏（只有在有有效ID时才添加）
+      if (mapRef.value && mapRef.value.addGeofence && response.geofenceId) {
+        try {
+          mapRef.value.addGeofence(newGeofence);
+          console.log('Successfully added geofence to map:', response.geofenceId);
+        } catch (error) {
+          console.warn('Failed to add geofence to map:', error);
+        }
+      }
+
+      // 异步重新加载完整的地理围栏列表以获得最新数据（包括缩略图等）
+      setTimeout(async () => {
+        try {
+          await loadGeofences();
+          console.log('Refreshed geofence list after creation');
+
+          // 刷新成功后，再次聚焦到新创建的地理围栏
+          const updatedGeofence = geofenceList.value.find(g => g.id === response.geofenceId);
+          if (updatedGeofence && mapRef.value && mapRef.value.focusGeofence) {
+            mapRef.value.focusGeofence(updatedGeofence);
+          }
+        } catch (error) {
+          console.warn('Failed to refresh geofence list:', error);
+          // 即使刷新失败，新围栏也已经显示了，不影响用户体验
+        }
+      }, 2000); // 延长到2秒，给缩略图生成更多时间
+
+    } else {
+      // 处理创建失败的情况
+      const errorMessage = response?.message || '创建地理围栏时发生未知错误';
+      notification.error({
+        message: '创建失败',
+        description: errorMessage,
+      });
+    }
+  } catch (error: any) {
+    console.error('Failed to create geofence:', error);
+
+    // 提取错误信息
+    let errorMessage = '无法创建地理围栏，请检查网络连接或稍后重试';
+
+    if (error?.response) {
+      // 服务器返回了错误响应
+      if (error.response.status === 403) {
+        errorMessage = '权限不足，无法创建地理围栏';
+      } else if (error.response.status === 400) {
+        errorMessage = error.response.data?.message || '请求参数有误';
+      } else if (error.response.status >= 500) {
+        errorMessage = '服务器内部错误，请稍后重试';
+      }
+    } else if (error?.request) {
+      // 网络错误
+      errorMessage = '网络连接失败，请检查网络连接';
+    }
+
+    notification.error({
+      message: '创建失败',
+      description: errorMessage,
+    });
+  } finally {
+    loading.value = false;
+  }
 };
 
 // 取消地理围栏设置
@@ -213,13 +410,28 @@ const cancelGeofenceForm = () => {
   });
 };
 
-// 删除地理围栏
-const deleteGeofence = (id: string) => {
-  const index = geofenceList.value.findIndex((item) => item.id === id);
-  if (index !== -1) {
-    const geofence = geofenceList.value[index];
-    if (geofence) {
-      geofenceList.value.splice(index, 1);
+// 删除地理围栏 - 使用真实API
+const deleteGeofence = async (id: string) => {
+  try {
+    loading.value = true;
+
+    const geofence = geofenceList.value.find(item => item.id === id);
+    if (!geofence) {
+      notification.error({
+        message: '删除失败',
+        description: '找不到指定的地理围栏',
+      });
+      return;
+    }
+
+    const response = await deleteGeofenceApi(id);
+
+    if (response.success) {
+      // 从列表中移除
+      const index = geofenceList.value.findIndex(item => item.id === id);
+      if (index !== -1) {
+        geofenceList.value.splice(index, 1);
+      }
 
       // 从地图移除
       mapRef.value?.removeGeofence(id);
@@ -228,7 +440,20 @@ const deleteGeofence = (id: string) => {
         message: '删除成功',
         description: `地理围栏 "${geofence.name}" 已删除`,
       });
+    } else {
+      notification.error({
+        message: '删除失败',
+        description: response.message || '删除地理围栏时发生错误',
+      });
     }
+  } catch (error) {
+    console.error('Failed to delete geofence:', error);
+    notification.error({
+      message: '删除失败',
+      description: '无法删除地理围栏，请检查网络连接或稍后重试',
+    });
+  } finally {
+    loading.value = false;
   }
 };
 
@@ -250,11 +475,15 @@ const geofenceStats = computed(() => {
   const flyZones = geofenceList.value.filter(
     (item) => item.type === 'FLY_ZONE',
   ).length;
+  const restrictedZones = geofenceList.value.filter(
+    (item) => item.type === 'RESTRICTED_ZONE',
+  ).length;
 
   return {
     total: geofenceList.value.length,
     noFlyZones,
     flyZones,
+    restrictedZones,
   };
 });
 
@@ -265,8 +494,28 @@ const handleKeydown = (event: KeyboardEvent) => {
   }
 };
 
-onMounted(() => {
+onMounted(async () => {
+  console.log('Geofence component mounted, starting initialization...');
+
   document.addEventListener('keydown', handleKeydown);
+
+  try {
+    // 测试API连接
+    console.log('Testing API connection...');
+    await testApiConnection();
+
+    // 加载地理围栏数据
+    console.log('Loading geofences...');
+    await loadGeofences();
+
+    console.log('Initialization completed successfully');
+  } catch (error) {
+    console.error('Initialization failed:', error);
+    notification.error({
+      message: '初始化失败',
+      description: '组件初始化过程中发生错误，请刷新页面重试',
+    });
+  }
 });
 </script>
 
@@ -280,17 +529,31 @@ onMounted(() => {
           <p class="mt-1 text-gray-600">设置和管理无人机飞行区域限制</p>
         </div>
         <div class="flex items-center space-x-4">
+          <!-- API连接状态指示器 -->
+          <div class="flex items-center space-x-2">
+            <div
+              :class="[
+                'w-2 h-2 rounded-full',
+                apiConnected ? 'bg-green-500' : 'bg-red-500'
+              ]"
+            ></div>
+            <span class="text-sm text-gray-500">
+              {{ apiConnected ? '后端已连接' : '后端连接异常' }}
+            </span>
+          </div>
+
           <div class="text-sm text-gray-500">
             总计: {{ geofenceStats.total }} | 禁飞区:
             {{ geofenceStats.noFlyZones }} | 允飞区:
-            {{ geofenceStats.flyZones }}
+            {{ geofenceStats.flyZones }} | 受限区:
+            {{ geofenceStats.restrictedZones }}
           </div>
           <Button
             type="primary"
             size="large"
             :loading="isDrawing"
             @click="startDrawing"
-            :disabled="isDrawing"
+            :disabled="isDrawing || !apiConnected"
           >
             <template #icon><PlusOutlined /></template>
             {{ isDrawing ? '绘制中...' : '开始绘制围栏' }}
@@ -365,14 +628,52 @@ onMounted(() => {
         <Form.Item label="围栏类型" required>
           <Radio.Group v-model:value="geofenceForm.type">
             <Radio value="NO_FLY_ZONE">
-              <span class="text-red-600">禁飞区</span>
-              <span class="ml-2 text-sm text-gray-500">限制无人机进入</span>
+              <span class="text-red-600">🚫 禁飞区</span>
+              <span class="ml-2 text-sm text-gray-500">完全禁止无人机进入和飞行</span>
+            </Radio>
+            <Radio value="RESTRICTED_ZONE">
+              <span class="text-yellow-600">⚠️ 限制区</span>
+              <span class="ml-2 text-sm text-gray-500">需要特殊权限才能进入</span>
             </Radio>
             <Radio value="FLY_ZONE">
-              <span class="text-green-600">允飞区</span>
-              <span class="ml-2 text-sm text-gray-500">允许无人机飞行</span>
+              <span class="text-green-600">✅ 允飞区</span>
+              <span class="ml-2 text-sm text-gray-500">允许无人机自由飞行</span>
             </Radio>
           </Radio.Group>
+        </Form.Item>
+
+        <Form.Item label="高度限制" class="mb-4">
+          <div class="space-y-3">
+            <div class="flex items-center space-x-3">
+              <label class="w-20 text-sm text-gray-600">最低高度:</label>
+              <Input
+                v-model:value="geofenceForm.altitudeMin"
+                type="number"
+                placeholder="米 (可选)"
+                :min="0"
+                :max="500"
+                class="w-32"
+                addonAfter="m"
+              />
+              <span class="text-xs text-gray-400">留空表示不限制</span>
+            </div>
+            <div class="flex items-center space-x-3">
+              <label class="w-20 text-sm text-gray-600">最高高度:</label>
+              <Input
+                v-model:value="geofenceForm.altitudeMax"
+                type="number"
+                placeholder="米 (可选)"
+                :min="0"
+                :max="500"
+                class="w-32"
+                addonAfter="m"
+              />
+              <span class="text-xs text-gray-400">留空表示不限制</span>
+            </div>
+            <div class="text-xs text-blue-600 bg-blue-50 p-2 rounded">
+              💡 提示：高度限制仅在禁飞区和限制区生效，允飞区通常不需要设置高度限制
+            </div>
+          </div>
         </Form.Item>
 
         <Form.Item label="关联无人机">

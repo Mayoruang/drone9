@@ -1,9 +1,9 @@
 version: '3.8'
 
 services:
-  # PostgreSQL 数据库
+  # PostgreSQL 数据库（更新为支持 PostGIS）
   postgres:
-    image: postgres:16.0
+    image: postgis/postgis:16-3.4
     container_name: drone-postgres
     environment:
       POSTGRES_DB: dronedb

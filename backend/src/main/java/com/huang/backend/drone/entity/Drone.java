@@ -1,5 +1,6 @@
 package com.huang.backend.drone.entity;
 
+import com.huang.backend.geofence.entity.Geofence;
 import jakarta.persistence.*;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
@@ -7,6 +8,8 @@ import lombok.Data;
 import lombok.NoArgsConstructor;
 
 import java.time.ZonedDateTime;
+import java.util.HashSet;
+import java.util.Set;
 import java.util.UUID;
 
 /**
@@ -70,6 +73,12 @@ public class Drone {
 
     @Column(name = "last_farewell_message")
     private String lastFarewellMessage;
+
+    /**
+     * Set of geofences associated with this drone
+     */
+    @ManyToMany(mappedBy = "drones")
+    private Set<Geofence> geofences = new HashSet<>();
 
     @Column(name = "created_at", nullable = false)
     private ZonedDateTime createdAt;

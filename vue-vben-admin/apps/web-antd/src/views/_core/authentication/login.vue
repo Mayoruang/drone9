@@ -93,6 +93,8 @@ const formSchema = computed((): VbenFormSchema[] => {
   <AuthenticationLogin
     :form-schema="formSchema"
     :loading="authStore.loginLoading"
+    title="欢迎使用 Drone9 🚁"
+    sub-title="智能化无人机交通管理，让空域更安全有序"
     @submit="authStore.authLogin"
   />
 </template>

@@ -39,6 +39,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             "/api/v1/drones/registration/**",
             "/api/v1/drones/management/**",
             "/api/v1/drones/test/**",
+            "/api/v1/geofences/**",
             "/actuator/**"
     );
 
@@ -57,8 +58,10 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
     ) throws ServletException, IOException {
         try {
             String jwt = parseJwt(request);
+            log.info("JWT Filter - Path: {}, JWT present: {}", request.getServletPath(), jwt != null);
             if (jwt != null) {
                 String username = jwtUtils.extractUsername(jwt);
+                log.info("JWT Filter - Username: {}", username);
                 if (StringUtils.hasText(username) && SecurityContextHolder.getContext().getAuthentication() == null) {
                     UserDetails userDetails = userDetailsService.loadUserByUsername(username);
                     if (jwtUtils.isTokenValid(jwt, userDetails)) {
@@ -69,6 +72,9 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                         );
                         authToken.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
                         SecurityContextHolder.getContext().setAuthentication(authToken);
+                        log.info("JWT Filter - Authentication successful for user: {}", username);
+                    } else {
+                        log.warn("JWT Filter - Token invalid for user: {}", username);
                     }
                 }
             }

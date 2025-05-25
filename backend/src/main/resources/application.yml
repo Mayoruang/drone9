@@ -15,12 +15,21 @@ spring:
   # JPA 配置
   jpa:
     hibernate:
-      ddl-auto: update
+      ddl-auto: validate
     show-sql: true
     properties:
       hibernate:
         format_sql: true
         dialect: org.hibernate.dialect.PostgreSQLDialect
+        dialect.spatial.use_spatial_functions: true
+  
+  # Flyway配置
+  flyway:
+    enabled: true
+    baseline-on-migrate: true
+    locations: classpath:db/migration
+    baseline-version: 0
+    validate-on-migrate: false
 
 # 应用配置
 application:

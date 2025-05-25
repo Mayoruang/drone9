@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>API测试</title>
+    <script src="https://unpkg.com/axios/dist/axios.min.js"></script>
+</head>
+<body>
+    <h1>地理围栏API测试</h1>
+    <div id="results"></div>
+    
+    <script>
+        async function testAPI() {
+            const results = document.getElementById('results');
+            
+            try {
+                // 测试连接
+                console.log('Testing connection...');
+                const testResponse = await axios.get('http://localhost:5667/api/v1/geofences/test');
+                console.log('Test response:', testResponse.data);
+                
+                // 测试列表API
+                console.log('Testing list API...');
+                const listResponse = await axios.get('http://localhost:5667/api/v1/geofences?page=0&size=5');
+                console.log('List response:', listResponse.data);
+                
+                results.innerHTML = `
+                    <h2>测试成功!</h2>
+                    <p><strong>连接测试:</strong> ${testResponse.data}</p>
+                    <p><strong>地理围栏数量:</strong> ${listResponse.data.totalElements}</p>
+                    <p><strong>第一个地理围栏:</strong> ${listResponse.data.content[0]?.name || '无'}</p>
+                    <p><strong>缩略图URL示例:</strong> ${listResponse.data.content[0]?.thumbnailUrl || '无'}</p>
+                    <pre>${JSON.stringify(listResponse.data, null, 2)}</pre>
+                `;
+            } catch (error) {
+                console.error('API test failed:', error);
+                results.innerHTML = `
+                    <h2>测试失败!</h2>
+                    <p><strong>错误:</strong> ${error.message}</p>
+                    <pre>${JSON.stringify(error.response?.data || error, null, 2)}</pre>
+                `;
+            }
+        }
+        
+        // 页面加载后自动测试
+        window.onload = testAPI;
+    </script>
+</body>
+</html> 

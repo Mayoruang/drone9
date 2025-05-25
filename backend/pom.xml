@@ -62,6 +62,27 @@
             <artifactId>spring-boot-starter-data-jpa</artifactId>
         </dependency>
 
+        <!-- Hibernate Spatial for PostGIS -->
+        <dependency>
+            <groupId>org.hibernate.orm</groupId>
+            <artifactId>hibernate-spatial</artifactId>
+            <version>${hibernate.version}</version>
+        </dependency>
+        
+        <!-- JTS Topology Suite -->
+        <dependency>
+            <groupId>org.locationtech.jts</groupId>
+            <artifactId>jts-core</artifactId>
+            <version>1.19.0</version>
+        </dependency>
+        
+        <!-- JTS GeoJSON Support -->
+        <dependency>
+            <groupId>org.wololo</groupId>
+            <artifactId>jts2geojson</artifactId>
+            <version>0.18.1</version>
+        </dependency>
+
         <!-- InfluxDB Client -->
         <dependency>
             <groupId>com.influxdb</groupId>
@@ -132,6 +153,12 @@
             <artifactId>jjwt-jackson</artifactId>
             <version>${jjwt.version}</version>
             <scope>runtime</scope>
+        </dependency>
+        
+        <!-- Flyway for database migrations -->
+        <dependency>
+            <groupId>org.flywaydb</groupId>
+            <artifactId>flyway-core</artifactId>
         </dependency>
     </dependencies>
 

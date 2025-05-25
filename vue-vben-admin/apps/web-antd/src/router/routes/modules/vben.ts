@@ -18,6 +18,7 @@ const routes: RouteRecordRaw[] = [
       icon: VBEN_LOGO_URL,
       order: 9998,
       title: $t('demos.vben.title'),
+      hideInMenu: true,
     },
     name: 'VbenProject',
     path: '/vben-admin',
@@ -30,6 +31,7 @@ const routes: RouteRecordRaw[] = [
           icon: 'lucide:book-open-text',
           link: VBEN_DOC_URL,
           title: $t('demos.vben.document'),
+          hideInMenu: true,
         },
       },
       {
@@ -40,6 +42,7 @@ const routes: RouteRecordRaw[] = [
           icon: 'mdi:github',
           link: VBEN_GITHUB_URL,
           title: 'Github',
+          hideInMenu: true,
         },
       },
       {
@@ -51,6 +54,7 @@ const routes: RouteRecordRaw[] = [
           icon: 'logos:naiveui',
           link: VBEN_NAIVE_PREVIEW_URL,
           title: $t('demos.vben.naive-ui'),
+          hideInMenu: true,
         },
       },
       {
@@ -62,6 +66,7 @@ const routes: RouteRecordRaw[] = [
           icon: 'logos:element',
           link: VBEN_ELE_PREVIEW_URL,
           title: $t('demos.vben.element-plus'),
+          hideInMenu: true,
         },
       },
     ],
@@ -74,6 +79,7 @@ const routes: RouteRecordRaw[] = [
       icon: 'lucide:copyright',
       title: $t('demos.vben.about'),
       order: 9999,
+      hideInMenu: true,
     },
   },
 ];

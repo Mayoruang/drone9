@@ -20,41 +20,40 @@ import {
   Tooltip,
 } from 'ant-design-vue';
 
-// 地理围栏数据接口
-interface GeofenceData {
-  id: string;
-  name: string;
-  type: 'FLY_ZONE' | 'NO_FLY_ZONE';
-  coordinates: Array<{ lat: number; lng: number }>;
-  description?: string;
-  createTime: string;
-  thumbnail?: string;
-  droneIds?: string[];
+// 导入统一的数据类型
+import type { GeofenceData } from '#/api/geofence';
+
+// 扩展地理围栏数据类型以包含额外字段
+interface ExtendedGeofenceData extends GeofenceData {
+  altitudeMin?: number;
+  altitudeMax?: number;
+  priority?: number;
+  areaSquareMeters?: number;
 }
 
 // 定义组件属性
 const props = defineProps<{
-  geofences: GeofenceData[];
+  geofences: ExtendedGeofenceData[];
   loading?: boolean;
 }>();
 
 // 定义事件
 const emit = defineEmits<{
-  (e: 'locate', geofence: GeofenceData): void;
+  (e: 'locate', geofence: ExtendedGeofenceData): void;
   (e: 'delete', id: string): void;
-  (e: 'view', geofence: GeofenceData): void;
+  (e: 'view', geofence: ExtendedGeofenceData): void;
 }>();
 
 // 状态管理
 const deleteModal = ref({
   visible: false,
-  geofence: null as GeofenceData | null,
+  geofence: null as ExtendedGeofenceData | null,
   loading: false,
 });
 
 const detailModal = ref({
   visible: false,
-  geofence: null as GeofenceData | null,
+  geofence: null as ExtendedGeofenceData | null,
 });
 
 // 计算属性
@@ -65,35 +64,78 @@ const sortedGeofences = computed(() => {
 });
 
 // 获取围栏类型样式
-const getGeofenceTypeConfig = (type: 'FLY_ZONE' | 'NO_FLY_ZONE') => {
-  return type === 'NO_FLY_ZONE'
-    ? {
+const getGeofenceTypeConfig = (type: 'FLY_ZONE' | 'NO_FLY_ZONE' | 'RESTRICTED_ZONE') => {
+  switch (type) {
+    case 'NO_FLY_ZONE':
+      return {
         color: '#ff4d4f',
         text: '禁飞区',
         bgColor: '#fff2f0',
         icon: '🚫',
-      }
-    : {
+        description: '完全禁止无人机进入和飞行',
+      };
+    case 'FLY_ZONE':
+      return {
         color: '#52c41a',
         text: '允飞区',
         bgColor: '#f6ffed',
         icon: '✅',
+        description: '允许无人机自由飞行',
       };
+    case 'RESTRICTED_ZONE':
+      return {
+        color: '#faad14',
+        text: '限制区',
+        bgColor: '#fffbe6',
+        icon: '⚠️',
+        description: '需要特殊权限才能进入',
+      };
+    default:
+      return {
+        color: '#d9d9d9',
+        text: '未知',
+        bgColor: '#f5f5f5',
+        icon: '❓',
+        description: '未知类型',
+      };
+  }
 };
 
 // 生成缩略图SVG
-const generateThumbnail = (geofence: GeofenceData) => {
+const generateThumbnail = (geofence: ExtendedGeofenceData) => {
   const config = getGeofenceTypeConfig(geofence.type);
   const coords = geofence.coordinates;
 
+  // 如果有缩略图URL，优先使用
+  if (geofence.thumbnail) {
+    return `
+      <div style="position: relative; width: 100%; height: 100%; background: #f0f9ff; display: flex; align-items: center; justify-content: center; border-radius: 4px; overflow: hidden;">
+        <img
+          src="${geofence.thumbnail}"
+          style="width: 100%; height: 100%; object-fit: cover;"
+          alt="${geofence.name}缩略图"
+          onError="this.style.display='none'; this.nextElementSibling.style.display='flex';"
+        />
+
+        <!-- 备用SVG缩略图 -->
+        <div style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: linear-gradient(45deg, #f0f9ff 0%, #e0f7fa 100%); display: none; align-items: center; justify-content: center;">
+          <div style="text-align: center; color: #666;">
+            <div style="font-size: 24px; margin-bottom: 4px;">${config.icon}</div>
+            <div style="font-size: 12px;">${config.text}</div>
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
   if (coords.length < 3) return '';
 
-  // 直接使用改进后的真实地图缩略图方案
+  // 备用方案：使用SVG生成缩略图
   return generateRealMapThumbnail(geofence, false);
 };
 
 // 生成真实地图缩略图（使用百度地图静态图作为背景）
-const generateRealMapThumbnail = (geofence: GeofenceData, isLarge: boolean = false) => {
+const generateRealMapThumbnail = (geofence: ExtendedGeofenceData, isLarge: boolean = false) => {
   const config = getGeofenceTypeConfig(geofence.type);
   const coords = geofence.coordinates;
 
@@ -210,7 +252,7 @@ const calculateOptimalZoom = (lngSpan: number, latSpan: number) => {
 };
 
 // 生成大尺寸缩略图（用于详情页面）
-const generateLargeThumbnail = (geofence: GeofenceData) => {
+const generateLargeThumbnail = (geofence: ExtendedGeofenceData) => {
   const config = getGeofenceTypeConfig(geofence.type);
   const coords = geofence.coordinates;
 
@@ -272,12 +314,12 @@ const getCoordinatesSummary = (
 };
 
 // 定位到地理围栏
-const handleLocate = (geofence: GeofenceData) => {
+const handleLocate = (geofence: ExtendedGeofenceData) => {
   emit('locate', geofence);
 };
 
 // 查看详情
-const handleView = (geofence: GeofenceData) => {
+const handleView = (geofence: ExtendedGeofenceData) => {
   detailModal.value = {
     visible: true,
     geofence,
@@ -293,7 +335,7 @@ const closeDetailModal = () => {
 };
 
 // 显示删除确认对话框
-const showDeleteModal = (geofence: GeofenceData) => {
+const showDeleteModal = (geofence: ExtendedGeofenceData) => {
   deleteModal.value = {
     visible: true,
     geofence,
@@ -413,6 +455,20 @@ const cancelDelete = () => {
                 <div class="flex items-center">
                   <InfoCircleOutlined class="mr-1" />
                   <span>顶点数: {{ geofence.coordinates.length }}</span>
+                </div>
+                <div v-if="geofence.areaSquareMeters" class="flex items-center">
+                  <span class="mr-1">📐</span>
+                  <span>面积: {{ (geofence.areaSquareMeters / 10000).toFixed(2) }} 公顷</span>
+                </div>
+                <div v-if="geofence.altitudeMin || geofence.altitudeMax" class="flex items-center">
+                  <span class="mr-1">⬆️</span>
+                  <span>高度限制:
+                    {{ geofence.altitudeMin || 0 }}m - {{ geofence.altitudeMax || '∞' }}m
+                  </span>
+                </div>
+                <div v-if="geofence.priority" class="flex items-center">
+                  <span class="mr-1">🔢</span>
+                  <span>优先级: {{ geofence.priority }}</span>
                 </div>
                 <div class="flex items-center">
                   <ClockCircleOutlined class="mr-1" />
@@ -592,6 +648,16 @@ const cancelDelete = () => {
           </Descriptions.Item>
           <Descriptions.Item label="顶点数量">
             {{ detailModal.geofence.coordinates.length }} 个
+          </Descriptions.Item>
+          <Descriptions.Item v-if="detailModal.geofence.areaSquareMeters" label="围栏面积">
+            {{ (detailModal.geofence.areaSquareMeters / 10000).toFixed(2) }} 公顷
+            ({{ detailModal.geofence.areaSquareMeters.toFixed(0) }} 平方米)
+          </Descriptions.Item>
+          <Descriptions.Item v-if="detailModal.geofence.altitudeMin || detailModal.geofence.altitudeMax" label="高度限制">
+            {{ detailModal.geofence.altitudeMin || 0 }}m - {{ detailModal.geofence.altitudeMax || '无限制' }}m
+          </Descriptions.Item>
+          <Descriptions.Item v-if="detailModal.geofence.priority" label="优先级">
+            {{ detailModal.geofence.priority }} 级
           </Descriptions.Item>
           <Descriptions.Item label="关联无人机">
             {{ detailModal.geofence.droneIds?.length || 0 }} 台
