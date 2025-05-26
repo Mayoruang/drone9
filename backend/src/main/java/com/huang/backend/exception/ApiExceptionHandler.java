@@ -6,6 +6,8 @@ import org.springframework.validation.FieldError;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ControllerAdvice;
 import org.springframework.web.bind.annotation.ExceptionHandler;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.time.ZonedDateTime;
 import java.util.HashMap;
@@ -16,6 +18,7 @@ import java.util.Map;
  */
 @ControllerAdvice
 public class ApiExceptionHandler {
+    private static final Logger log = LoggerFactory.getLogger(ApiExceptionHandler.class);
 
     /**
      * Handle IllegalArgumentException - usually validation or business rule violations
@@ -66,5 +69,21 @@ public class ApiExceptionHandler {
                 .build();
         
         return new ResponseEntity<>(validationError, HttpStatus.BAD_REQUEST);
+    }
+
+    /**
+     * Handle general exceptions
+     */
+    @ExceptionHandler(Exception.class)
+    public ResponseEntity<ApiError> handleGeneralException(Exception ex) {
+        log.error("Unexpected error occurred: {}", ex.getMessage(), ex);
+        
+        ApiError apiError = ApiError.builder()
+                .message("分配地理围栏时发生错误: " + ex.getMessage())
+                .status(HttpStatus.INTERNAL_SERVER_ERROR.value())
+                .timestamp(ZonedDateTime.now())
+                .build();
+        
+        return new ResponseEntity<>(apiError, HttpStatus.INTERNAL_SERVER_ERROR);
     }
 } 

@@ -313,8 +313,8 @@ public class RegistrationServiceImpl implements RegistrationService {
         String mqttPassword = generateRandomPassword(12);
         String passwordHash = passwordEncoder.encode(mqttPassword);
         
-        // Create MQTT topics based on patterns
-        String droneIdentifier = request.getSerialNumber(); // 使用序列号作为唯一标识
+        // Create MQTT topics based on patterns using UUID for uniqueness
+        String droneIdentifier = droneId.toString(); // 使用UUID作为唯一标识，确保全局唯一性
         String telemetryTopic = mqttTopicTelemetryPattern.replace("+", droneIdentifier);
         String commandsTopic = mqttTopicCommandsPattern.replace("+", droneIdentifier);
         

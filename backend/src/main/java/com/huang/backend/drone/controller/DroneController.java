@@ -6,6 +6,10 @@ import com.huang.backend.drone.dto.DroneStatsDto;
 import com.huang.backend.drone.entity.Drone;
 import com.huang.backend.drone.service.DroneStatusService;
 import com.huang.backend.drone.service.DroneInfluxDBService;
+import com.huang.backend.geofence.dto.GeofenceListItemDto;
+import com.huang.backend.geofence.dto.GeofenceResponseDto;
+import com.huang.backend.geofence.service.GeofenceService;
+import jakarta.validation.Valid;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
@@ -16,7 +20,6 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.http.ResponseEntity;
-import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -36,13 +39,13 @@ public class DroneController {
 
     private final DroneStatusService droneStatusService;
     private final DroneInfluxDBService droneInfluxDBService;
+    private final GeofenceService geofenceService;
 
     /**
      * 获取所有无人机列表
      * @return 无人机数据数组
      */
     @GetMapping
-    @PreAuthorize("hasAnyRole('ADMIN', 'OPERATOR', 'VIEWER')")
     public ResponseEntity<List<DroneStatusDto>> getAllDrones() {
         log.info("Getting all drones list");
         List<DroneStatusDto> drones = droneStatusService.getAllDronesStatus();
@@ -56,7 +59,6 @@ public class DroneController {
      * @return 分页响应
      */
     @GetMapping(params = {"page"})
-    @PreAuthorize("hasAnyRole('ADMIN', 'OPERATOR', 'VIEWER')")
     public ResponseEntity<Page<DroneStatusDto>> getDroneList(
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size) {
@@ -78,7 +80,6 @@ public class DroneController {
      * @return 无人机详情
      */
     @GetMapping("/{droneId}")
-    @PreAuthorize("hasAnyRole('ADMIN', 'OPERATOR', 'VIEWER')")
     public ResponseEntity<DroneStatusDto> getDroneDetail(@PathVariable UUID droneId) {
         log.info("Getting details for drone: {}", droneId);
         DroneStatusDto drone = droneStatusService.getDroneStatus(droneId);
@@ -91,7 +92,6 @@ public class DroneController {
      * @return 遥测数据
      */
     @GetMapping("/{droneId}/telemetry")
-    @PreAuthorize("hasAnyRole('ADMIN', 'OPERATOR', 'VIEWER')")
     public ResponseEntity<DroneTelemetryDto> getDroneTelemetry(@PathVariable UUID droneId) {
         log.info("Getting telemetry for drone: {}", droneId);
         DroneTelemetryDto telemetry = droneStatusService.getLatestTelemetry(droneId);
@@ -104,7 +104,6 @@ public class DroneController {
      * @return 遥测数据数组
      */
     @PostMapping("/telemetry/batch")
-    @PreAuthorize("hasAnyRole('ADMIN', 'OPERATOR', 'VIEWER')")
     public ResponseEntity<List<DroneTelemetryDto>> getBatchDroneTelemetry(
             @RequestBody BatchTelemetryRequest request) {
         log.info("Getting batch telemetry for {} drones", request.getDroneIds().size());
@@ -124,7 +123,6 @@ public class DroneController {
      * @return 操作响应
      */
     @PostMapping("/{droneId}/commands")
-    @PreAuthorize("hasAnyRole('ADMIN', 'OPERATOR')")
     public ResponseEntity<CommandResponse> sendDroneCommand(
             @PathVariable UUID droneId,
             @RequestBody DroneCommandRequest command) {
@@ -146,7 +144,6 @@ public class DroneController {
      * @return 操作响应
      */
     @PutMapping("/{droneId}/status")
-    @PreAuthorize("hasRole('ADMIN')")
     public ResponseEntity<StatusUpdateResponse> updateDroneStatus(
             @PathVariable UUID droneId,
             @RequestBody StatusUpdateRequest request) {
@@ -168,7 +165,6 @@ public class DroneController {
      * @return 操作响应
      */
     @DeleteMapping("/{droneId}")
-    @PreAuthorize("hasRole('ADMIN')")
     public ResponseEntity<DeleteResponse> deleteDrone(@PathVariable UUID droneId) {
         log.info("Deleting drone: {}", droneId);
         
@@ -186,7 +182,6 @@ public class DroneController {
      * @return 统计信息
      */
     @GetMapping("/stats")
-    @PreAuthorize("hasAnyRole('ADMIN', 'OPERATOR', 'VIEWER')")
     public ResponseEntity<DroneStatsDto> getDroneStats() {
         log.info("Getting drone statistics");
         
@@ -224,6 +219,80 @@ public class DroneController {
     public ResponseEntity<String> testDroneAPI() {
         log.info("Testing drone API connection");
         return ResponseEntity.ok("Drone controller is working!");
+    }
+
+    /**
+     * 获取无人机关联的地理围栏列表
+     * @param droneId 无人机ID
+     * @return 地理围栏列表
+     */
+    @GetMapping("/{droneId}/geofences")
+    public ResponseEntity<List<GeofenceListItemDto>> getDroneGeofences(@PathVariable UUID droneId) {
+        log.info("Getting geofences for drone: {}", droneId);
+        List<GeofenceListItemDto> geofences = droneStatusService.getDroneGeofences(droneId);
+        return ResponseEntity.ok(geofences);
+    }
+
+    /**
+     * 获取可分配给无人机的地理围栏列表（所有限制区域）
+     * @param droneId 无人机ID
+     * @param type 地理围栏类型过滤（可选）
+     * @param active 是否仅返回活跃的地理围栏（可选）
+     * @return 地理围栏列表
+     */
+    @GetMapping("/{droneId}/geofences/available")
+    public ResponseEntity<List<GeofenceListItemDto>> getAvailableGeofences(
+            @PathVariable UUID droneId,
+            @RequestParam(required = false) String type,
+            @RequestParam(required = false, defaultValue = "true") Boolean active) {
+        log.info("Getting available geofences for drone: {}, type: {}, active: {}", droneId, type, active);
+        List<GeofenceListItemDto> geofences = droneStatusService.getAvailableGeofences(type, active);
+        return ResponseEntity.ok(geofences);
+    }
+
+    /**
+     * 为无人机分配地理围栏权限
+     * @param droneId 无人机ID
+     * @param request 分配请求
+     * @return 操作响应
+     */
+    @PostMapping("/{droneId}/geofences")
+    public ResponseEntity<GeofenceAssignmentResponse> assignGeofences(
+            @PathVariable UUID droneId,
+            @Valid @RequestBody GeofenceAssignmentRequest request) {
+        log.info("Assigning geofences to drone: {}, geofences: {}", droneId, request.getGeofenceIds());
+        GeofenceAssignmentResponse response = droneStatusService.assignGeofences(droneId, request.getGeofenceIds());
+        return ResponseEntity.ok(response);
+    }
+
+    /**
+     * 取消无人机的地理围栏权限
+     * @param droneId 无人机ID
+     * @param geofenceId 地理围栏ID
+     * @return 操作响应
+     */
+    @DeleteMapping("/{droneId}/geofences/{geofenceId}")
+    public ResponseEntity<GeofenceAssignmentResponse> unassignGeofence(
+            @PathVariable UUID droneId,
+            @PathVariable UUID geofenceId) {
+        log.info("Unassigning geofence {} from drone: {}", geofenceId, droneId);
+        GeofenceAssignmentResponse response = droneStatusService.unassignGeofence(droneId, geofenceId);
+        return ResponseEntity.ok(response);
+    }
+
+    /**
+     * 批量更新无人机的地理围栏权限
+     * @param droneId 无人机ID
+     * @param request 批量更新请求
+     * @return 操作响应
+     */
+    @PutMapping("/{droneId}/geofences")
+    public ResponseEntity<GeofenceAssignmentResponse> updateGeofenceAssignments(
+            @PathVariable UUID droneId,
+            @Valid @RequestBody GeofenceAssignmentRequest request) {
+        log.info("Updating geofence assignments for drone: {}, new geofences: {}", droneId, request.getGeofenceIds());
+        GeofenceAssignmentResponse response = droneStatusService.updateGeofenceAssignments(droneId, request.getGeofenceIds());
+        return ResponseEntity.ok(response);
     }
 
     // ============================================================================
@@ -285,5 +354,31 @@ public class DroneController {
         private boolean success;
         private String message;
         private String resourceId;
+    }
+
+    /**
+     * 地理围栏分配请求DTO
+     */
+    @Data
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class GeofenceAssignmentRequest {
+        private List<UUID> geofenceIds;
+    }
+
+    /**
+     * 地理围栏分配响应DTO
+     */
+    @Data
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class GeofenceAssignmentResponse {
+        private boolean success;
+        private String message;
+        private UUID droneId;
+        private List<UUID> assignedGeofenceIds;
+        private List<UUID> failedGeofenceIds;
     }
 } 

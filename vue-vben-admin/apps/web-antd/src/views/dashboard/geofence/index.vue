@@ -19,6 +19,7 @@ import {
   createGeofence,
   deleteGeofence as deleteGeofenceApi,
   testGeofenceAPI,
+  bindDronesToGeofence,
   type GeofenceData
 } from '#/api/geofence';
 import { requestClient, baseRequestClient } from '#/api/request';
@@ -62,14 +63,54 @@ const geofenceForm = reactive({
 // 地理围栏列表 - 现在从API获取
 const geofenceList = ref<ExtendedGeofenceData[]>([]);
 
-// Mock数据 - 无人机列表（暂时保留，后续可从无人机API获取）
+// Mock数据 - 无人机列表（沈阳地区的无人机数据作为备选方案）
 const droneList = ref<DroneData[]>([
-  { id: 'drone001', serialNumber: 'DJI001', name: '大疆 Mavic Air 2' },
-  { id: 'drone002', serialNumber: 'DJI002', name: '大疆 Mini 3 Pro' },
-  { id: 'drone003', serialNumber: 'DJI003', name: '大疆 Phantom 4' },
-  { id: 'drone004', serialNumber: 'AUTEL001', name: 'Autel EVO II' },
-  { id: 'drone005', serialNumber: 'YUNEEC001', name: 'Yuneec Typhoon H' },
+  { id: '27ab5670-4643-4b87-8dd3-69de10785b65', serialNumber: 'SY-DJI-001', name: '大疆 Mavic Air 2 (沈阳故宫)' },
+  { id: '4e46038f-e3aa-4d49-ac46-e516d3948adf', serialNumber: 'SY-DJI-002', name: '大疆 Mini 3 Pro (沈阳工业大学)' },
+  { id: '995643aa-6926-4296-98c1-d3295c249be0', serialNumber: 'SY-AUTEL-001', name: 'Autel EVO II Pro (沈阳北站)' },
+  { id: '14ca5bc3-69ac-4571-a52b-eff4ba072970', serialNumber: 'SY-YUNEEC-001', name: 'Yuneec Typhoon H Plus (沈阳农业大学)' },
+  { id: '262f9dab-200f-406b-9031-f96fce463eb3', serialNumber: 'SY-DJI-003', name: '大疆 Phantom 4 RTK (沈阳奥体中心)' },
+  { id: '6fde6608-832b-4f46-9475-c588c6dd220e', serialNumber: 'SY-DJI-004', name: '大疆 Matrice 300 RTK (沈阳桃仙机场)' },
 ]);
+
+// 加载无人机列表
+const loadDroneList = async () => {
+  try {
+    console.log('尝试从API加载无人机列表...');
+    // 尝试从无人机API获取数据，使用分页查询
+    const response = await baseRequestClient.get('/v1/drones', {
+      params: {
+        page: 0,
+        size: 100,
+      }
+    });
+
+    console.log('无人机API响应:', response);
+
+    // 处理分页响应数据
+    if (response.data && response.data.content && Array.isArray(response.data.content)) {
+      droneList.value = response.data.content.map((drone: any) => ({
+        id: drone.droneId || drone.id,
+        serialNumber: drone.serialNumber,
+        name: `${drone.model || '未知型号'} (${drone.serialNumber})`,
+      }));
+      console.log('成功从API加载无人机列表:', droneList.value.length);
+    } else if (response.data && Array.isArray(response.data)) {
+      // 如果不是分页响应，直接处理数组
+      droneList.value = response.data.map((drone: any) => ({
+        id: drone.droneId || drone.id,
+        serialNumber: drone.serialNumber,
+        name: `${drone.model || '未知型号'} (${drone.serialNumber})`,
+      }));
+      console.log('成功从API加载无人机列表(非分页):', droneList.value.length);
+    } else {
+      console.log('API返回的无人机数据格式不正确，使用沈阳地区Mock数据');
+    }
+  } catch (error) {
+    console.warn('无法从API加载无人机列表，使用沈阳地区Mock数据:', error);
+    // 保留沈阳地区Mock数据作为备选方案
+  }
+};
 
 // 从API加载地理围栏数据
 const loadGeofences = async () => {
@@ -280,14 +321,15 @@ const saveGeofence = async () => {
   try {
     loading.value = true;
 
+    // 第一步：创建地理围栏（不包含droneIds）
     const createData = {
       name: geofenceForm.name,
       type: geofenceForm.type,
       coordinates: editingGeofence.value.coordinates,
       description: geofenceForm.description,
-      droneIds: geofenceForm.droneIds,
       altitudeMin: geofenceForm.altitudeMin,
       altitudeMax: geofenceForm.altitudeMax,
+      // 不包含droneIds，避免400错误
     };
 
     console.log('Creating geofence with data:', createData);
@@ -296,6 +338,45 @@ const saveGeofence = async () => {
 
     // 检查响应是否成功（response已经是解包后的数据）
     if (response && response.success) {
+      const geofenceId = response.geofenceId;
+
+      // 第二步：如果有选择的无人机，进行绑定操作
+      if (geofenceForm.droneIds && geofenceForm.droneIds.length > 0 && geofenceId) {
+        try {
+          console.log('Binding drones to geofence:', geofenceForm.droneIds);
+          const bindResponse = await bindDronesToGeofence(geofenceId, geofenceForm.droneIds);
+
+          if (bindResponse.success) {
+            console.log('Successfully bound drones to geofence');
+          } else {
+            console.warn('Failed to bind drones:', bindResponse.message);
+            notification.warning({
+              message: '地理围栏创建成功，但无人机绑定失败',
+              description: bindResponse.message || '部分功能可能不可用',
+            });
+          }
+        } catch (bindError: any) {
+          console.error('Failed to bind drones to geofence:', bindError);
+
+          let bindErrorMessage = '无人机绑定失败，可以稍后在详情页面手动绑定无人机';
+
+          if (bindError?.response) {
+            if (bindError.response.status === 404) {
+              bindErrorMessage = '选择的无人机不存在，请检查无人机列表';
+            } else if (bindError.response.status === 400) {
+              bindErrorMessage = bindError.response.data?.message || '无人机绑定参数错误';
+            } else if (bindError.response.status === 403) {
+              bindErrorMessage = '没有权限绑定无人机到地理围栏';
+            }
+          }
+
+          notification.warning({
+            message: '地理围栏创建成功，但无人机绑定失败',
+            description: bindErrorMessage,
+          });
+        }
+      }
+
       // 显示成功通知
       notification.success({
         message: '地理围栏创建成功',
@@ -508,6 +589,10 @@ onMounted(async () => {
     console.log('Loading geofences...');
     await loadGeofences();
 
+    // 加载无人机列表
+    console.log('Loading drone list...');
+    await loadDroneList();
+
     console.log('Initialization completed successfully');
   } catch (error) {
     console.error('Initialization failed:', error);
@@ -681,12 +766,10 @@ onMounted(async () => {
             v-model:value="geofenceForm.droneIds"
             mode="multiple"
             placeholder="选择要应用此围栏的无人机"
-            :options="
-              droneList.map((drone) => ({
+            :options="droneList.map((drone) => ({
                 value: drone.id,
                 label: `${drone.serialNumber} - ${drone.name}`,
-              }))
-            "
+            }))"
             allow-clear
           />
         </Form.Item>

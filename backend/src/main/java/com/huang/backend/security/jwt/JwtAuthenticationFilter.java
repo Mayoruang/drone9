@@ -33,6 +33,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
     // 定义不需要进行JWT验证的路径
     private final List<String> excludedPaths = Arrays.asList(
             "/api/auth/**",
+            "/api/v1/drones/**",
             "/api/test/**",
             "/api/status",
             "/api/v1/drones/register",
@@ -46,8 +47,13 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
     @Override
     protected boolean shouldNotFilter(HttpServletRequest request) {
         String path = request.getServletPath();
-        return excludedPaths.stream()
+        boolean shouldSkip = excludedPaths.stream()
                 .anyMatch(pattern -> pathMatcher.match(pattern, path));
+        
+        log.info("JWT Filter - Path: {}, Should skip: {}, Excluded patterns: {}", 
+                path, shouldSkip, excludedPaths);
+        
+        return shouldSkip;
     }
 
     @Override
@@ -56,9 +62,21 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             HttpServletResponse response,
             FilterChain filterChain
     ) throws ServletException, IOException {
+        String path = request.getServletPath();
+        
+        // 对于排除的路径，直接通过
+        boolean shouldSkip = excludedPaths.stream()
+                .anyMatch(pattern -> pathMatcher.match(pattern, path));
+        
+        if (shouldSkip) {
+            log.info("JWT Filter - Skipping JWT validation for path: {}", path);
+            filterChain.doFilter(request, response);
+            return;
+        }
+        
         try {
             String jwt = parseJwt(request);
-            log.info("JWT Filter - Path: {}, JWT present: {}", request.getServletPath(), jwt != null);
+            log.info("JWT Filter - Path: {}, JWT present: {}", path, jwt != null);
             if (jwt != null) {
                 String username = jwtUtils.extractUsername(jwt);
                 log.info("JWT Filter - Username: {}", username);

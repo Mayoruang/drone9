@@ -78,6 +78,38 @@ interface DroneStatusStats {
   lowBattery: number;
 }
 
+// 地理围栏相关接口
+interface GeofenceListItem {
+  geofenceId: UUID;
+  name: string;
+  description?: string;
+  center: [number, number];
+  geometry: any;
+  geofenceType: string;
+  thumbnailUrl?: string;
+  active: boolean;
+  altitudeMin?: number;
+  altitudeMax?: number;
+  priority: number;
+  areaSquareMeters?: number;
+  createdAt: Timestamp;
+  updatedAt: Timestamp;
+}
+
+// 地理围栏分配请求
+interface GeofenceAssignmentRequest {
+  geofenceIds: UUID[];
+}
+
+// 地理围栏分配响应
+interface GeofenceAssignmentResponse {
+  success: boolean;
+  message: string;
+  droneId: UUID;
+  assignedGeofenceIds: UUID[];
+  failedGeofenceIds: UUID[];
+}
+
 // API响应格式
 interface ApiResponse<T = any> {
   code: number;
@@ -238,6 +270,103 @@ export async function testDroneAPI(): Promise<boolean> {
 }
 
 // ============================================================================
+// 地理围栏相关API函数
+// ============================================================================
+
+/**
+ * 获取无人机关联的地理围栏列表
+ * @param droneId 无人机ID
+ * @returns 地理围栏列表
+ */
+export async function getDroneGeofences(droneId: UUID): Promise<GeofenceListItem[]> {
+  const response = await requestClient.get<GeofenceListItem[]>(
+    `/v1/drones/${droneId}/geofences`,
+    { responseReturn: 'body' }
+  );
+  return response || [];
+}
+
+/**
+ * 获取可分配给无人机的地理围栏列表
+ * @param droneId 无人机ID
+ * @param type 地理围栏类型过滤（可选）
+ * @param active 是否仅返回活跃的地理围栏（可选）
+ * @returns 地理围栏列表
+ */
+export async function getAvailableGeofences(
+  droneId: UUID,
+  type?: string,
+  active: boolean = true
+): Promise<GeofenceListItem[]> {
+  const params: Record<string, any> = { active };
+  if (type) {
+    params.type = type;
+  }
+
+  const response = await requestClient.get<GeofenceListItem[]>(
+    `/v1/drones/${droneId}/geofences/available`,
+    { 
+      params,
+      responseReturn: 'body'
+    }
+  );
+  return response || [];
+}
+
+/**
+ * 为无人机分配地理围栏权限
+ * @param droneId 无人机ID
+ * @param geofenceIds 地理围栏ID列表
+ * @returns 分配响应
+ */
+export async function assignGeofences(
+  droneId: UUID,
+  geofenceIds: UUID[]
+): Promise<GeofenceAssignmentResponse> {
+  const response = await requestClient.post<GeofenceAssignmentResponse>(
+    `/v1/drones/${droneId}/geofences`,
+    { geofenceIds },
+    { responseReturn: 'body' }
+  );
+  return response;
+}
+
+/**
+ * 取消无人机的地理围栏权限
+ * @param droneId 无人机ID
+ * @param geofenceId 地理围栏ID
+ * @returns 取消响应
+ */
+export async function unassignGeofence(
+  droneId: UUID,
+  geofenceId: UUID
+): Promise<GeofenceAssignmentResponse> {
+  const response = await requestClient.delete<GeofenceAssignmentResponse>(
+    `/v1/drones/${droneId}/geofences/${geofenceId}`,
+    { responseReturn: 'body' }
+  );
+  return response;
+}
+
+/**
+ * 批量更新无人机的地理围栏权限
+ * @param droneId 无人机ID
+ * @param geofenceIds 新的地理围栏ID列表
+ * @returns 更新响应
+ */
+export async function updateGeofenceAssignments(
+  droneId: UUID,
+  geofenceIds: UUID[]
+): Promise<GeofenceAssignmentResponse> {
+  const response = await requestClient.put<GeofenceAssignmentResponse>(
+    `/v1/drones/${droneId}/geofences`,
+    { geofenceIds },
+    { responseReturn: 'body' }
+  );
+  return response;
+}
+
+// ============================================================================
 // 数据处理工具函数
 // ============================================================================
 
@@ -340,4 +469,7 @@ export type {
   DroneTelemetry,
   DroneData,
   DroneStatusStats,
+  GeofenceListItem,
+  GeofenceAssignmentRequest,
+  GeofenceAssignmentResponse,
 };

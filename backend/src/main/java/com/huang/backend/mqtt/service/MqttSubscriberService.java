@@ -24,6 +24,7 @@ import java.util.Optional;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import java.util.UUID;
 
 /**
  * MQTT Subscriber Service that listens for drone telemetry data
@@ -186,10 +187,8 @@ public class MqttSubscriberService implements MqttCallback {
         // Parse JSON payload for normal telemetry
         DroneTelemetryData telemetryData = objectMapper.readValue(message.getPayload(), DroneTelemetryData.class);
         
-        // Set drone ID from topic if not present in payload
-        if (telemetryData.getDroneId() == null) {
-            telemetryData.setDroneId(droneId);
-        }
+        // Always use drone ID from topic (UUID) instead of UUID from payload
+        telemetryData.setDroneId(droneId);
         
         // Set timestamp if not present in payload
         if (telemetryData.getTimestamp() == null) {
@@ -245,20 +244,24 @@ public class MqttSubscriberService implements MqttCallback {
     /**
      * Update the drone's last heartbeat timestamp in the database
      * 
-     * @param droneId the ID of the drone
+     * @param droneId the UUID of the drone (extracted from MQTT topic)
      */
     private void updateDroneHeartbeat(String droneId) {
         try {
-            Optional<Drone> droneOpt = droneRepository.findBySerialNumber(droneId);
+            // droneId is now UUID from topic, not serial number
+            UUID droneUuid = UUID.fromString(droneId);
+            Optional<Drone> droneOpt = droneRepository.findById(droneUuid);
             if (droneOpt.isPresent()) {
                 Drone drone = droneOpt.get();
                 ZonedDateTime now = ZonedDateTime.ofInstant(Instant.now(), ZoneId.systemDefault());
                 drone.setLastHeartbeatAt(now);
                 droneRepository.save(drone);
-                log.debug("已更新无人机{}的最后心跳时间", droneId);
+                log.debug("已更新无人机{}({})的最后心跳时间", drone.getSerialNumber(), droneId);
             } else {
-                log.warn("未找到序列号为{}的无人机", droneId);
+                log.warn("未找到UUID为{}的无人机", droneId);
             }
+        } catch (IllegalArgumentException e) {
+            log.error("无效的UUID格式: {}", droneId, e);
         } catch (Exception e) {
             log.error("更新无人机心跳时间失败: {}", e.getMessage(), e);
         }
@@ -267,19 +270,20 @@ public class MqttSubscriberService implements MqttCallback {
     /**
      * 将遥测数据转换并推送到WebSocket
      * 
-     * @param droneId 无人机ID
+     * @param droneId UUID of the drone (extracted from MQTT topic)
      * @param telemetryData 遥测数据
      */
     private void sendTelemetryToWebSocket(String droneId, DroneTelemetryData telemetryData) {
         try {
-            // 查找无人机记录获取UUID
-            Optional<Drone> droneOpt = droneRepository.findBySerialNumber(droneId);
+            // droneId is now UUID from topic, not serial number
+            UUID droneUuid = UUID.fromString(droneId);
+            Optional<Drone> droneOpt = droneRepository.findById(droneUuid);
             if (droneOpt.isPresent()) {
                 Drone drone = droneOpt.get();
                 
-                // 转换为DroneTelemetryDto
+                // 转换为DroneTelemetryDto - use serial number for compatibility
                 DroneTelemetryDto dto = DroneTelemetryDto.builder()
-                    .droneId(droneId)
+                    .droneId(drone.getSerialNumber()) // Use serial number for frontend compatibility
                     .timestamp(telemetryData.getTimestamp())
                     .batteryLevel(telemetryData.getBatteryLevel())
                     .batteryVoltage(telemetryData.getBatteryVoltage())
@@ -302,16 +306,20 @@ public class MqttSubscriberService implements MqttCallback {
                         if (drone.getCurrentStatus() != newStatus) {
                             drone.setCurrentStatus(newStatus);
                             droneRepository.save(drone);
-                            log.info("根据遥测数据更新无人机{}状态为: {}", droneId, newStatus);
+                            log.info("根据遥测数据更新无人机{}({})状态为: {}", drone.getSerialNumber(), droneId, newStatus);
                         }
                     } catch (IllegalArgumentException e) {
-                        log.warn("无人机{}发送了无效的状态值: {}", droneId, telemetryData.getStatus());
+                        log.warn("无人机{}({})发送了无效的状态值: {}", drone.getSerialNumber(), droneId, telemetryData.getStatus());
                     }
                 }
                 
                 // 通过WebSocket处理器发送更新
                 droneWebSocketHandler.sendDroneUpdate(drone.getDroneId(), dto);
+            } else {
+                log.warn("WebSocket推送失败：未找到UUID为{}的无人机", droneId);
             }
+        } catch (IllegalArgumentException e) {
+            log.error("WebSocket推送失败：无效的UUID格式: {}", droneId, e);
         } catch (Exception e) {
             log.error("发送遥测数据到WebSocket失败: {}", e.getMessage(), e);
         }
@@ -320,7 +328,7 @@ public class MqttSubscriberService implements MqttCallback {
     /**
      * Handle a farewell message from a drone before it goes offline
      * 
-     * @param droneId the ID of the drone
+     * @param droneId the UUID of the drone (extracted from MQTT topic)
      * @param message the MQTT message
      */
     private void handleFarewellMessage(String droneId, MqttMessage message) {
@@ -330,8 +338,9 @@ public class MqttSubscriberService implements MqttCallback {
             
             log.info("收到无人机{}的告别消息: {}", droneId, farewell.getMessage());
             
-            // Find the drone in the database
-            Optional<Drone> droneOpt = droneRepository.findBySerialNumber(droneId);
+            // Find the drone in the database using UUID
+            UUID droneUuid = UUID.fromString(droneId);
+            Optional<Drone> droneOpt = droneRepository.findById(droneUuid);
             if (droneOpt.isPresent()) {
                 Drone drone = droneOpt.get();
                 
@@ -355,7 +364,7 @@ public class MqttSubscriberService implements MqttCallback {
                         drone.setOfflineBy(farewell.getIssuedBy());
                     }
                     
-                    log.info("更新无人机{}状态为离线", droneId);
+                    log.info("更新无人机{}({})状态为离线", drone.getSerialNumber(), droneId);
                 }
                 
                 // Save the updated drone
@@ -363,7 +372,7 @@ public class MqttSubscriberService implements MqttCallback {
                 
                 // Create a telemetry DTO for the farewell message
                 DroneTelemetryDto dto = DroneTelemetryDto.builder()
-                    .droneId(droneId)
+                    .droneId(drone.getSerialNumber()) // Use serial number for frontend compatibility
                     .timestamp(farewell.getTimestamp())
                     .batteryLevel(farewell.getBatteryRemaining())
                     .build();
@@ -371,8 +380,10 @@ public class MqttSubscriberService implements MqttCallback {
                 // Send a WebSocket message to notify clients
                 droneWebSocketHandler.sendDroneUpdate(drone.getDroneId(), dto);
             } else {
-                log.warn("收到未知无人机{}的告别消息", droneId);
+                log.warn("收到未知无人机UUID={}的告别消息", droneId);
             }
+        } catch (IllegalArgumentException e) {
+            log.error("处理告别消息失败：无效的UUID格式: {}", droneId, e);
         } catch (Exception e) {
             log.error("处理无人机告别消息失败: {}", e.getMessage(), e);
         }

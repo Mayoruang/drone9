@@ -91,4 +91,9 @@ public class TelemetryData {
      */
     @JsonAlias({"flight_status"})
     private String status;
+    
+    /**
+     * Whether the drone is armed (ready for flight)
+     */
+    private Boolean isArmed;
 } 

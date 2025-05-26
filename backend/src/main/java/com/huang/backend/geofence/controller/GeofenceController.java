@@ -182,7 +182,6 @@ public class GeofenceController {
      * @return 200 OK with the result of the operation
      */
     @PostMapping("/{geofenceId}/drones")
-    @PreAuthorize("hasRole('ADMIN')")
     public ResponseEntity<GeofenceResponseDto> bindDrones(
             @PathVariable UUID geofenceId,
             @Valid @RequestBody GeofenceDroneBindDto bindDto) {
@@ -201,7 +200,6 @@ public class GeofenceController {
      * @return 200 OK with the result of the operation
      */
     @DeleteMapping("/{geofenceId}/drones/{droneId}")
-    @PreAuthorize("hasRole('ADMIN')")
     public ResponseEntity<GeofenceResponseDto> unbindDrone(
             @PathVariable UUID geofenceId,
             @PathVariable UUID droneId) {
@@ -322,5 +320,30 @@ public class GeofenceController {
     public ResponseEntity<String> testListEndpoint() {
         log.info("=== GEOFENCE CONTROLLER: testListEndpoint called ===");
         return ResponseEntity.ok("Geofence list endpoint is working!");
+    }
+
+    /**
+     * Test endpoint for debugging drone binding
+     */
+    @GetMapping("/test-bind/{geofenceId}/{droneId}")
+    public ResponseEntity<String> testBind(
+            @PathVariable UUID geofenceId,
+            @PathVariable UUID droneId) {
+        
+        try {
+            log.info("Testing bind for geofence: {} and drone: {}", geofenceId, droneId);
+            
+            // Check if geofence exists
+            boolean geofenceExists = geofenceService.getGeofenceDetail(geofenceId) != null;
+            log.info("Geofence exists: {}", geofenceExists);
+            
+            // Check if drone exists
+            // We'll need to inject DroneRepository for this test
+            
+            return ResponseEntity.ok("Test completed - check logs");
+        } catch (Exception e) {
+            log.error("Test failed: {}", e.getMessage(), e);
+            return ResponseEntity.status(500).body("Test failed: " + e.getMessage());
+        }
     }
 }

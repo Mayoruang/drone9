@@ -84,9 +84,9 @@ public class DroneManagementServiceImpl implements DroneManagementService {
                     .build();
             
             // Publish the command to the drone's command topic
-            commandSent = mqttPublisherService.publishCommand(drone.getSerialNumber(), command);
+            commandSent = mqttPublisherService.publishCommand(drone.getDroneId().toString(), command);
             
-            log.info("Sent offline command to drone {}: {}", drone.getSerialNumber(), commandSent);
+            log.info("Sent offline command to drone {} ({}): {}", drone.getSerialNumber(), drone.getDroneId(), commandSent);
         } catch (Exception e) {
             log.error("Error sending offline command to drone {}: {}", drone.getSerialNumber(), e.getMessage(), e);
         }
@@ -165,7 +165,7 @@ public class DroneManagementServiceImpl implements DroneManagementService {
                             .build();
                     
                     // Publish the command
-                    mqttPublisherService.publishCommand(serialNumber, command);
+                    mqttPublisherService.publishCommand(drone.getDroneId().toString(), command);
                 } catch (Exception e) {
                     log.warn("Failed to send offline command before deletion: {}", e.getMessage());
                     // Continue with deletion even if command fails

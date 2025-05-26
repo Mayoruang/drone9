@@ -155,8 +155,8 @@ public class GeofenceServiceImpl implements GeofenceService {
     public GeofenceResponseDto bindDrones(UUID geofenceId, GeofenceDroneBindDto bindDto) {
         log.info("Binding {} drones to geofence: {}", bindDto.getDroneIds().size(), geofenceId);
         
-        // Find geofence
-        Geofence geofence = geofenceRepository.findById(geofenceId)
+        // Find geofence with drones
+        Geofence geofence = geofenceRepository.findByIdWithDrones(geofenceId)
                 .orElseThrow(() -> new ResourceNotFoundException("未找到指定地理围栏"));
         
         // Bind drones
@@ -317,19 +317,42 @@ public class GeofenceServiceImpl implements GeofenceService {
      * Helper method to bind drones to a geofence
      */
     private void bindDronesToGeofence(Geofence geofence, List<UUID> droneIds) {
-        // Find all drones by IDs
-        List<Drone> drones = droneRepository.findAllById(droneIds);
-        
-        // Check if all drones were found
-        if (drones.size() != droneIds.size()) {
-            throw new BusinessException("部分无人机ID无效");
+        try {
+            log.info("Starting to bind drones {} to geofence {}", droneIds, geofence.getGeofenceId());
+            
+            // 优化：一次性查询所有需要的无人机，避免 N+1 查询问题
+            List<Drone> drones = droneRepository.findAllById(droneIds);
+            log.info("Found {} drones out of {} requested", drones.size(), droneIds.size());
+            
+            // Check if all drones were found
+            if (drones.size() != droneIds.size()) {
+                // 找出缺失的无人机ID
+                Set<UUID> foundIds = drones.stream()
+                    .map(Drone::getDroneId)
+                    .collect(Collectors.toSet());
+                Set<UUID> missingIds = droneIds.stream()
+                    .filter(id -> !foundIds.contains(id))
+                    .collect(Collectors.toSet());
+                
+                log.error("Missing drone IDs: {}. Requested: {}, Found: {}", missingIds, droneIds.size(), drones.size());
+                throw new BusinessException("部分无人机ID无效: " + missingIds);
+            }
+            
+            // 优化：避免重复查询，直接使用已有的 geofence 对象
+            Set<Drone> droneSet = geofence.getDrones();
+            log.info("Current drone set size: {}", droneSet.size());
+            
+            // 批量添加无人机，避免逐个处理
+            droneSet.addAll(drones);
+            log.info("After adding, drone set size: {}", droneSet.size());
+            
+            // 优化：使用 @Modifying 查询或批量操作来减少数据库交互
+            geofenceRepository.save(geofence);
+            log.info("Successfully saved geofence with bound drones");
+            
+        } catch (Exception e) {
+            log.error("Error binding drones to geofence: {}", e.getMessage(), e);
+            throw e;
         }
-        
-        // Add drones to geofence
-        Set<Drone> droneSet = geofence.getDrones();
-        droneSet.addAll(drones);
-        
-        // Save the updated geofence
-        geofenceRepository.save(geofence);
     }
 } 

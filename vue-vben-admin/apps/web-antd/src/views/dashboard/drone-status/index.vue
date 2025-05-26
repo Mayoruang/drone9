@@ -1,13 +1,28 @@
 <script lang="ts" setup>
 import { ref, onMounted, onUnmounted, computed, reactive, watch } from 'vue';
-import { Card, Drawer, Button, Tabs, Descriptions, Tag, Slider, Switch, Input, notification, Space, Modal, Form, Tooltip } from 'ant-design-vue';
-import { EyeOutlined, SendOutlined, EnvironmentOutlined, BarsOutlined, WarningOutlined, ClockCircleOutlined, BorderOutlined, ToolOutlined, ExperimentOutlined } from '@ant-design/icons-vue';
+import { Card, Drawer, Button, Tabs, Descriptions, Tag, Slider, Switch, Input, notification, Space, Modal, Form, Tooltip, Select, Checkbox } from 'ant-design-vue';
+import { EyeOutlined, SendOutlined, EnvironmentOutlined, BarsOutlined, WarningOutlined, ClockCircleOutlined, BorderOutlined, ToolOutlined, ExperimentOutlined, DeleteOutlined, ReloadOutlined, PlusOutlined } from '@ant-design/icons-vue';
 import SockJS from 'sockjs-client';
 import Stomp from 'webstomp-client';
 // @ts-ignore
 import axios from 'axios';
 // 导入地图组件
 import BaiduMap from './BaiduMap.vue';
+// 导入地理围栏API方法
+import {
+  getDroneGeofences,
+  getAvailableGeofences,
+  assignGeofences,
+  unassignGeofence,
+  updateGeofenceAssignments,
+  type GeofenceListItem,
+  type GeofenceAssignmentResponse,
+} from '#/api/drone';
+// 添加地理围栏页面的API导入
+import {
+  getAllGeofences,
+  type GeofenceData
+} from '#/api/geofence';
 
 // 无人机状态类型
 type DroneStatus = 'FLYING' | 'IDLE' | 'LOW_BATTERY' | 'TRAJECTORY_ERROR' | 'OFFLINE';
@@ -1314,6 +1329,302 @@ const focusAllDrones = () => {
   }, 100); // 短暂延迟以确保地图已完全初始化
 };
 
+// ============================================================================
+// 地理围栏相关功能
+// ============================================================================
+
+// 地理围栏相关状态
+const droneGeofences = ref<GeofenceListItem[]>([]);
+const availableGeofences = ref<GeofenceListItem[]>([]);
+const selectedGeofences = ref<Set<string>>(new Set());
+// 添加所有地理围栏状态
+const allGeofences = ref<GeofenceData[]>([]);
+
+// 加载状态
+const loadingDroneGeofences = ref(false);
+const loadingAvailableGeofences = ref(false);
+const assigningGeofences = ref(false);
+const removingGeofences = ref<Set<string>>(new Set());
+// 添加加载所有地理围栏的状态
+const loadingAllGeofences = ref(false);
+
+// 筛选选项
+const geofenceTypeFilter = ref<string>();
+const showActiveOnly = ref(true);
+
+// 计算属性：过滤后的可用地理围栏
+const filteredAvailableGeofences = computed(() => {
+  return availableGeofences.value.filter(geofence => {
+    // 排除已分配的地理围栏
+    const isAssigned = droneGeofences.value.some(assigned =>
+      assigned.geofenceId === geofence.geofenceId
+    );
+    return !isAssigned;
+  });
+});
+
+// 加载无人机关联的地理围栏
+const loadDroneGeofences = async () => {
+  if (!selectedDrone.value?.droneId) return;
+
+  loadingDroneGeofences.value = true;
+  try {
+    droneGeofences.value = await getDroneGeofences(selectedDrone.value.droneId);
+    console.log(`加载到${droneGeofences.value.length}个已分配的地理围栏`);
+  } catch (error) {
+    // 这里的问题：API成功返回数据，但被当作错误处理了
+    console.error('加载无人机地理围栏失败:', error);
+    notification.error({
+      message: '加载失败',
+      description: '无法获取无人机地理围栏信息'
+    });
+  } finally {
+    loadingDroneGeofences.value = false;
+  }
+};
+
+// 加载可用的地理围栏
+const loadAvailableGeofences = async () => {
+  if (!selectedDrone.value?.droneId) return;
+
+  loadingAvailableGeofences.value = true;
+  try {
+    availableGeofences.value = await getAvailableGeofences(
+      selectedDrone.value.droneId,
+      geofenceTypeFilter.value,
+      showActiveOnly.value
+    );
+    console.log(`加载到${availableGeofences.value.length}个可用地理围栏`);
+  } catch (error) {
+    // 这里的问题：API成功返回数据，但被当作错误处理了
+    console.error('加载可用地理围栏失败:', error);
+    notification.error({
+      message: '加载失败',
+      description: '无法获取可用地理围栏信息'
+    });
+  } finally {
+    loadingAvailableGeofences.value = false;
+  }
+};
+
+// 加载所有地理围栏（参照地理围栏页面的实现）
+const loadAllGeofences = async () => {
+  loadingAllGeofences.value = true;
+  try {
+    allGeofences.value = await getAllGeofences();
+    console.log(`加载到${allGeofences.value.length}个地理围栏`);
+
+    notification.success({
+      message: '加载成功',
+      description: `成功加载 ${allGeofences.value.length} 个地理围栏`,
+    });
+  } catch (error: any) {
+    console.error('加载地理围栏失败:', error);
+
+    // 设置为空数组，避免页面崩溃
+    allGeofences.value = [];
+
+    // 根据错误类型显示不同的提示
+    if (error.response?.status === 500) {
+      notification.warning({
+        message: '服务器错误',
+        description: '地理围栏服务暂时不可用，显示空列表。这可能是因为数据库中还没有地理围栏数据。',
+      });
+    } else if (error.response?.status === 403) {
+      notification.error({
+        message: '权限不足',
+        description: '没有权限访问地理围栏数据，请联系管理员',
+      });
+    } else {
+      notification.error({
+        message: '加载失败',
+        description: '无法从服务器获取地理围栏数据，请检查网络连接或稍后重试',
+      });
+    }
+  } finally {
+    loadingAllGeofences.value = false;
+  }
+};
+
+// 移除地理围栏
+const removeGeofence = async (geofenceId: string) => {
+  if (!selectedDrone.value?.droneId) return;
+
+  removingGeofences.value.add(geofenceId);
+  try {
+    const response = await unassignGeofence(selectedDrone.value.droneId, geofenceId);
+
+    if (response.success) {
+      notification.success({
+        message: '移除成功',
+        description: response.message
+      });
+      // 重新加载数据
+      await loadDroneGeofences();
+      await loadAvailableGeofences();
+    } else {
+      notification.error({
+        message: '移除失败',
+        description: response.message
+      });
+    }
+  } catch (error) {
+    console.error('移除地理围栏失败:', error);
+    notification.error({
+      message: '移除失败',
+      description: '无法移除地理围栏权限'
+    });
+  } finally {
+    removingGeofences.value.delete(geofenceId);
+  }
+};
+
+// 切换地理围栏选择状态
+const toggleGeofenceSelection = (geofenceId: string) => {
+  if (selectedGeofences.value.has(geofenceId)) {
+    selectedGeofences.value.delete(geofenceId);
+  } else {
+    selectedGeofences.value.add(geofenceId);
+  }
+  // 触发响应式更新
+  selectedGeofences.value = new Set(selectedGeofences.value);
+};
+
+// 清除选择
+const clearGeofenceSelection = () => {
+  selectedGeofences.value.clear();
+  selectedGeofences.value = new Set();
+};
+
+// 分配选中的地理围栏
+const assignSelectedGeofences = async () => {
+  if (!selectedDrone.value?.droneId || selectedGeofences.value.size === 0) return;
+
+  assigningGeofences.value = true;
+  try {
+    const geofenceIds = Array.from(selectedGeofences.value);
+    const response = await assignGeofences(selectedDrone.value.droneId, geofenceIds);
+
+    if (response.success) {
+      notification.success({
+        message: '分配成功',
+        description: response.message
+      });
+
+      // 清除选择并重新加载数据
+      clearGeofenceSelection();
+      await loadDroneGeofences();
+      await loadAvailableGeofences();
+    } else {
+      notification.error({
+        message: '分配失败',
+        description: response.message
+      });
+    }
+  } catch (error) {
+    console.error('分配地理围栏失败:', error);
+    notification.error({
+      message: '分配失败',
+      description: '无法分配地理围栏权限'
+    });
+  } finally {
+    assigningGeofences.value = false;
+  }
+};
+
+// 从所有地理围栏列表中分配地理围栏给无人机
+const assignGeofenceFromAll = async (geofenceId: string) => {
+  if (!selectedDrone.value?.droneId) return;
+
+  try {
+    const response = await assignGeofences(selectedDrone.value.droneId, [geofenceId]);
+
+    if (response.success) {
+      notification.success({
+        message: '分配成功',
+        description: response.message
+      });
+
+      // 重新加载数据
+      await Promise.all([
+        loadDroneGeofences(),
+        loadAvailableGeofences()
+      ]);
+    } else {
+      notification.error({
+        message: '分配失败',
+        description: response.message
+      });
+    }
+  } catch (error) {
+    console.error('分配地理围栏失败:', error);
+    notification.error({
+      message: '分配失败',
+      description: '无法分配地理围栏权限'
+    });
+  }
+};
+
+// 获取地理围栏类型颜色
+const getGeofenceTypeColor = (type: string): string => {
+  const colorMap: Record<string, string> = {
+    'NO_FLY_ZONE': 'red',
+    'FLY_ZONE': 'green',
+    'RESTRICTED_ZONE': 'orange',
+  };
+  return colorMap[type] || 'default';
+};
+
+// 获取地理围栏类型文本
+const getGeofenceTypeText = (type: string): string => {
+  const textMap: Record<string, string> = {
+    'NO_FLY_ZONE': '禁飞区',
+    'FLY_ZONE': '允飞区',
+    'RESTRICTED_ZONE': '限飞区',
+  };
+  return textMap[type] || type;
+};
+
+// 格式化面积
+const formatArea = (areaSquareMeters: number): string => {
+  if (areaSquareMeters < 1000) {
+    return `${areaSquareMeters.toFixed(0)}㎡`;
+  } else if (areaSquareMeters < 1000000) {
+    return `${(areaSquareMeters / 1000).toFixed(1)}k㎡`;
+  } else {
+    return `${(areaSquareMeters / 1000000).toFixed(2)}k㎡`;
+  }
+};
+
+// 检查地理围栏是否已经分配给当前无人机
+const isGeofenceAssigned = (geofenceId: string): boolean => {
+  return droneGeofences.value.some(assigned => assigned.geofenceId === geofenceId);
+};
+
+// 监听选中无人机变化，自动加载地理围栏数据
+watch(selectedDrone, async (newDrone) => {
+  if (newDrone?.droneId) {
+    // 清除之前的选择
+    clearGeofenceSelection();
+    // 加载数据
+    await Promise.all([
+      loadDroneGeofences(),
+      loadAvailableGeofences()
+    ]);
+  }
+});
+
+// 监听抽屉打开状态，当打开地理围栏标签时加载数据
+watch(activeTabKey, async (newKey) => {
+  if (newKey === '3' && selectedDrone.value?.droneId) {
+    await Promise.all([
+      loadDroneGeofences(),
+      loadAvailableGeofences(),
+      loadAllGeofences() // 添加加载所有地理围栏
+    ]);
+  }
+});
+
 // 扩展Window接口以包含BMap_loadScriptTime属性
 declare global {
   interface Window {
@@ -1529,29 +1840,217 @@ declare global {
           </Tabs.TabPane>
 
           <!-- 地理围栏标签 -->
-          <Tabs.TabPane key="3" tab="地理围栏">
-            <div class="space-y-4">
-              <div class="flex items-center justify-between">
-                <span class="font-medium">地理围栏状态:</span>
-                <Switch :checked="geofenceActive" @change="toggleGeofence" />
-              </div>
-
+          <Tabs.TabPane key="3" tab="地理围栏权限">
+            <div class="space-y-6">
+              <!-- 当前已分配的地理围栏 -->
               <div>
-                <p class="mb-2 font-medium">围栏半径: {{ geofenceRadius }}米</p>
-                <Slider
-                  v-model:value="geofenceRadius"
-                  :min="100"
-                  :max="2000"
-                  :step="100"
-                  :disabled="!geofenceActive"
-                />
+                <div class="flex items-center justify-between mb-4">
+                  <h4 class="text-lg font-medium">已分配的地理围栏</h4>
+                  <Button type="primary" @click="loadDroneGeofences" :loading="loadingDroneGeofences">
+                    <template #icon><ReloadOutlined /></template>
+                    刷新
+                  </Button>
+                </div>
+
+                <div v-if="droneGeofences.length === 0" class="text-center py-8 text-gray-500">
+                  <BorderOutlined class="text-4xl mb-2" />
+                  <p>暂无分配的地理围栏</p>
+                </div>
+
+                <div v-else class="space-y-3">
+                  <div
+                    v-for="geofence in droneGeofences"
+                    :key="geofence.geofenceId"
+                    class="border rounded-lg p-4 bg-gray-50"
+                  >
+                    <div class="flex items-center justify-between">
+                      <div class="flex-1">
+                        <div class="flex items-center space-x-2">
+                          <h5 class="font-medium">{{ geofence.name }}</h5>
+                          <Tag :color="getGeofenceTypeColor(geofence.geofenceType)">
+                            {{ getGeofenceTypeText(geofence.geofenceType) }}
+                          </Tag>
+                          <Tag v-if="geofence.active" color="green">活跃</Tag>
+                          <Tag v-else color="red">非活跃</Tag>
+                        </div>
+                        <p class="text-gray-600 text-sm mt-1">{{ geofence.description || '暂无描述' }}</p>
+                        <div class="flex items-center space-x-4 text-xs text-gray-500 mt-2">
+                          <span>优先级: {{ geofence.priority }}</span>
+                          <span v-if="geofence.areaSquareMeters">
+                            面积: {{ formatArea(geofence.areaSquareMeters) }}
+                          </span>
+                          <span v-if="geofence.altitudeMin || geofence.altitudeMax">
+                            高度: {{ geofence.altitudeMin || 0 }}-{{ geofence.altitudeMax || '∞' }}m
+                          </span>
+                        </div>
+                      </div>
+                      <Button
+                        type="text"
+                        danger
+                        @click="removeGeofence(geofence.geofenceId)"
+                        :loading="removingGeofences.has(geofence.geofenceId)"
+                      >
+                        <template #icon><DeleteOutlined /></template>
+                        移除
+                      </Button>
+                    </div>
+                  </div>
+                </div>
               </div>
 
-              <div class="mt-4">
-                <Button type="primary" :disabled="!geofenceActive" @click="toggleGeofence">
-                  <template #icon><BorderOutlined /></template>
-                  应用围栏
-                </Button>
+              <!-- 分配新的地理围栏 -->
+              <div>
+                <div class="flex items-center justify-between mb-4">
+                  <h4 class="text-lg font-medium">分配地理围栏</h4>
+                  <div class="flex items-center space-x-2">
+                    <Select
+                      v-model:value="geofenceTypeFilter"
+                      placeholder="筛选类型"
+                      style="width: 120px"
+                      allowClear
+                      @change="loadAvailableGeofences"
+                    >
+                      <Select.Option value="NO_FLY_ZONE">禁飞区</Select.Option>
+                      <Select.Option value="FLY_ZONE">允飞区</Select.Option>
+                      <Select.Option value="RESTRICTED_ZONE">限飞区</Select.Option>
+                    </Select>
+                    <Switch
+                      v-model:checked="showActiveOnly"
+                      checkedChildren="仅活跃"
+                      unCheckedChildren="全部"
+                      @change="loadAvailableGeofences"
+                    />
+                    <Button @click="loadAvailableGeofences" :loading="loadingAvailableGeofences">
+                      <template #icon><ReloadOutlined /></template>
+                    </Button>
+                  </div>
+                </div>
+
+                <div v-if="availableGeofences.length === 0" class="text-center py-8 text-gray-500">
+                  <EnvironmentOutlined class="text-4xl mb-2" />
+                  <p>暂无可分配的地理围栏</p>
+                </div>
+
+                <div v-else class="space-y-3 max-h-96 overflow-y-auto">
+                  <div
+                    v-for="geofence in filteredAvailableGeofences"
+                    :key="geofence.geofenceId"
+                    class="border rounded-lg p-4 hover:bg-gray-50 cursor-pointer"
+                    :class="{ 'bg-blue-50 border-blue-300': selectedGeofences.has(geofence.geofenceId) }"
+                    @click="toggleGeofenceSelection(geofence.geofenceId)"
+                  >
+                    <div class="flex items-center justify-between">
+                      <div class="flex-1">
+                        <div class="flex items-center space-x-2">
+                          <Checkbox
+                            :checked="selectedGeofences.has(geofence.geofenceId)"
+                            @change="toggleGeofenceSelection(geofence.geofenceId)"
+                          />
+                          <h5 class="font-medium">{{ geofence.name }}</h5>
+                          <Tag :color="getGeofenceTypeColor(geofence.geofenceType)">
+                            {{ getGeofenceTypeText(geofence.geofenceType) }}
+                          </Tag>
+                          <Tag v-if="geofence.active" color="green">活跃</Tag>
+                          <Tag v-else color="red">非活跃</Tag>
+                        </div>
+                        <p class="text-gray-600 text-sm mt-1">{{ geofence.description || '暂无描述' }}</p>
+                        <div class="flex items-center space-x-4 text-xs text-gray-500 mt-2">
+                          <span>优先级: {{ geofence.priority }}</span>
+                          <span v-if="geofence.areaSquareMeters">
+                            面积: {{ formatArea(geofence.areaSquareMeters) }}
+                          </span>
+                          <span v-if="geofence.altitudeMin || geofence.altitudeMax">
+                            高度: {{ geofence.altitudeMin || 0 }}-{{ geofence.altitudeMax || '∞' }}m
+                          </span>
+                          <span>创建时间: {{ new Date(geofence.createdAt).toLocaleDateString() }}</span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- 批量操作按钮 -->
+                <div v-if="selectedGeofences.size > 0" class="mt-4 p-4 bg-blue-50 rounded-lg">
+                  <div class="flex items-center justify-between">
+                    <span class="text-blue-700">
+                      已选择 {{ selectedGeofences.size }} 个地理围栏
+                    </span>
+                    <div class="space-x-2">
+                      <Button @click="clearGeofenceSelection">取消选择</Button>
+                      <Button type="primary" @click="assignSelectedGeofences" :loading="assigningGeofences">
+                        <template #icon><PlusOutlined /></template>
+                        分配选中的地理围栏
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- 所有地理围栏列表 -->
+              <div>
+                <div class="flex items-center justify-between mb-4">
+                  <h4 class="text-lg font-medium">所有地理围栏</h4>
+                  <Button @click="loadAllGeofences" :loading="loadingAllGeofences">
+                    <template #icon><ReloadOutlined /></template>
+                    刷新
+                  </Button>
+                </div>
+
+                <div v-if="allGeofences.length === 0" class="text-center py-8 text-gray-500">
+                  <EnvironmentOutlined class="text-4xl mb-2" />
+                  <p v-if="loadingAllGeofences">正在加载地理围栏...</p>
+                  <p v-else>暂无地理围栏数据</p>
+                </div>
+
+                <div v-else class="space-y-3 max-h-96 overflow-y-auto">
+                  <div
+                    v-for="geofence in allGeofences"
+                    :key="geofence.id"
+                    class="border rounded-lg p-4 hover:bg-gray-50"
+                    :class="{ 'bg-green-50 border-green-300': isGeofenceAssigned(geofence.id) }"
+                  >
+                    <div class="flex items-center justify-between">
+                      <div class="flex-1">
+                        <div class="flex items-center space-x-2">
+                          <h5 class="font-medium">{{ geofence.name }}</h5>
+                          <Tag :color="getGeofenceTypeColor(geofence.type)">
+                            {{ getGeofenceTypeText(geofence.type) }}
+                          </Tag>
+                          <Tag v-if="geofence.active" color="green">活跃</Tag>
+                          <Tag v-else color="red">非活跃</Tag>
+                          <Tag v-if="isGeofenceAssigned(geofence.id)" color="blue">已分配</Tag>
+                        </div>
+                        <p class="text-gray-600 text-sm mt-1">{{ geofence.description || '暂无描述' }}</p>
+                        <div class="flex items-center space-x-4 text-xs text-gray-500 mt-2">
+                          <span>坐标点: {{ geofence.coordinates.length }} 个</span>
+                          <span>创建时间: {{ new Date(geofence.createTime).toLocaleDateString() }}</span>
+                          <span v-if="geofence.droneIds">关联无人机: {{ geofence.droneIds.length }} 台</span>
+                        </div>
+                      </div>
+                      <div class="flex space-x-2">
+                        <Button
+                          v-if="!isGeofenceAssigned(geofence.id)"
+                          type="primary"
+                          size="small"
+                          @click="assignGeofenceFromAll(geofence.id)"
+                        >
+                          <template #icon><PlusOutlined /></template>
+                          分配
+                        </Button>
+                        <Button
+                          v-else
+                          type="default"
+                          size="small"
+                          @click="removeGeofence(geofence.id)"
+                          :loading="removingGeofences.has(geofence.id)"
+                        >
+                          <template #icon><DeleteOutlined /></template>
+                          移除
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
               </div>
             </div>
           </Tabs.TabPane>
