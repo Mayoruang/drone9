@@ -19,6 +19,13 @@ import { useAuthStore } from '#/store';
 
 import { refreshTokenApi } from './core';
 
+// 扩展Window接口以支持错误时间记录
+declare global {
+  interface Window {
+    _lastErrorTimes?: Record<string, number>;
+  }
+}
+
 // Get apiURL from env, if not provided, default to '/api'
 const { apiURL } = useAppConfig(import.meta.env, import.meta.env.PROD);
 const DEFAULT_API_URL = '/api';
@@ -101,7 +108,36 @@ function createRequestClient(baseURL: string, options?: RequestClientOptions) {
       // 当前mock接口返回的错误字段是 error 或者 message
       const responseData = error?.response?.data ?? {};
       const errorMessage = responseData?.error ?? responseData?.message ?? '';
-      // 如果没有错误信息，则会根据状态码进行提示
+      
+      // 过滤掉一些不需要显示的错误
+      const url = error?.config?.url || '';
+      const status = error?.response?.status;
+      const method = error?.config?.method?.toUpperCase();
+      
+      console.log(`🔍 全局错误拦截器检查: ${method} ${url}, status=${status}, success=${responseData?.success}`);
+      
+      // 🚫 完全禁用无人机相关API的全局错误提示，让前端组件自己处理
+      if (url.includes('/drones/') || url.includes('/commands')) {
+        console.log('🚫 跳过所有无人机API的全局错误提示，交由前端组件处理');
+        return;
+      }
+      
+      // 防止重复错误提示（同样的错误信息在3秒内不重复显示）
+      const errorKey = `${method}_${url}_${status}_${errorMessage || msg}`;
+      const now = Date.now();
+      const lastErrorTime = window._lastErrorTimes?.[errorKey] || 0;
+      
+      if (now - lastErrorTime < 3000) {
+        console.log('⏭️ 跳过重复错误提示:', errorKey);
+        return;
+      }
+      
+      // 记录错误时间
+      window._lastErrorTimes = window._lastErrorTimes || {};
+      window._lastErrorTimes[errorKey] = now;
+      
+      // 显示错误信息
+      console.error('🚨 API错误:', { url, status, method, msg, errorMessage, responseData, error });
       message.error(errorMessage || msg);
     }),
   );

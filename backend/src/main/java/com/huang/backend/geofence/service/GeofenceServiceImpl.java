@@ -48,6 +48,21 @@ public class GeofenceServiceImpl implements GeofenceService {
     public GeofenceResponseDto createGeofence(GeofenceCreateDto createDto, String username) {
         log.info("Creating new geofence with name: {}", createDto.getName());
         
+        // 新增：验证地理围栏类型和无人机绑定的合法性
+        if (createDto.getDroneIds() != null && !createDto.getDroneIds().isEmpty()) {
+            Geofence.GeofenceType geofenceType;
+            try {
+                geofenceType = Geofence.GeofenceType.valueOf(createDto.getGeofenceType());
+            } catch (IllegalArgumentException e) {
+                throw new BusinessException("无效的地理围栏类型: " + createDto.getGeofenceType());
+            }
+            
+            if (geofenceType != Geofence.GeofenceType.RESTRICTED_ZONE) {
+                String typeName = getGeofenceTypeName(geofenceType);
+                throw new BusinessException(String.format("%s不需要关联无人机，只有限制区才能关联无人机", typeName));
+            }
+        }
+        
         // Create new geofence entity from DTO
         Geofence geofence = geofenceMapper.toEntity(createDto);
         geofence.setCreatedBy(username);
@@ -55,7 +70,7 @@ public class GeofenceServiceImpl implements GeofenceService {
         // Save the geofence
         Geofence savedGeofence = geofenceRepository.save(geofence);
         
-        // Bind drones if provided
+        // Bind drones if provided and geofence type allows it
         if (createDto.getDroneIds() != null && !createDto.getDroneIds().isEmpty()) {
             bindDronesToGeofence(savedGeofence, createDto.getDroneIds());
         }
@@ -102,6 +117,21 @@ public class GeofenceServiceImpl implements GeofenceService {
         Geofence geofence = geofenceRepository.findById(geofenceId)
                 .orElseThrow(() -> new ResourceNotFoundException("未找到指定地理围栏"));
         
+        // 新增：验证地理围栏类型和无人机绑定的合法性
+        if (updateDto.getDroneIds() != null && !updateDto.getDroneIds().isEmpty()) {
+            Geofence.GeofenceType geofenceType;
+            try {
+                geofenceType = Geofence.GeofenceType.valueOf(updateDto.getGeofenceType());
+            } catch (IllegalArgumentException e) {
+                throw new BusinessException("无效的地理围栏类型: " + updateDto.getGeofenceType());
+            }
+            
+            if (geofenceType != Geofence.GeofenceType.RESTRICTED_ZONE) {
+                String typeName = getGeofenceTypeName(geofenceType);
+                throw new BusinessException(String.format("%s不需要关联无人机，只有限制区才能关联无人机", typeName));
+            }
+        }
+        
         // Update fields from DTO
         geofenceMapper.updateEntityFromDto(geofence, updateDto);
         geofence.setUpdatedBy(username);
@@ -111,10 +141,17 @@ public class GeofenceServiceImpl implements GeofenceService {
         
         // Update drone associations if provided
         if (updateDto.getDroneIds() != null) {
+            // 验证更新后的地理围栏类型是否允许关联无人机
+            if (!updateDto.getDroneIds().isEmpty() && 
+                updatedGeofence.getGeofenceType() != Geofence.GeofenceType.RESTRICTED_ZONE) {
+                String typeName = getGeofenceTypeName(updatedGeofence.getGeofenceType());
+                throw new BusinessException(String.format("%s不需要关联无人机，只有限制区才能关联无人机", typeName));
+            }
+            
             // Clear existing associations
             updatedGeofence.getDrones().clear();
             
-            // Bind new drones
+            // Bind new drones only if the list is not empty
             if (!updateDto.getDroneIds().isEmpty()) {
                 bindDronesToGeofence(updatedGeofence, updateDto.getDroneIds());
             }
@@ -159,6 +196,12 @@ public class GeofenceServiceImpl implements GeofenceService {
         Geofence geofence = geofenceRepository.findByIdWithDrones(geofenceId)
                 .orElseThrow(() -> new ResourceNotFoundException("未找到指定地理围栏"));
         
+        // 新增：验证地理围栏类型，只有限制区可以绑定无人机
+        if (geofence.getGeofenceType() != Geofence.GeofenceType.RESTRICTED_ZONE) {
+            String typeName = getGeofenceTypeName(geofence.getGeofenceType());
+            throw new BusinessException(String.format("%s不需要关联无人机，只有限制区才能关联无人机", typeName));
+        }
+        
         // Bind drones
         bindDronesToGeofence(geofence, bindDto.getDroneIds());
         
@@ -177,6 +220,12 @@ public class GeofenceServiceImpl implements GeofenceService {
         // Find geofence with drones
         Geofence geofence = geofenceRepository.findByIdWithDrones(geofenceId)
                 .orElseThrow(() -> new ResourceNotFoundException("未找到指定地理围栏"));
+        
+        // 新增：验证地理围栏类型，只有限制区可以解绑无人机
+        if (geofence.getGeofenceType() != Geofence.GeofenceType.RESTRICTED_ZONE) {
+            String typeName = getGeofenceTypeName(geofence.getGeofenceType());
+            throw new BusinessException(String.format("%s不需要关联无人机，只有限制区才能关联无人机", typeName));
+        }
         
         // Find drone
         Drone drone = droneRepository.findById(droneId)
@@ -320,6 +369,13 @@ public class GeofenceServiceImpl implements GeofenceService {
         try {
             log.info("Starting to bind drones {} to geofence {}", droneIds, geofence.getGeofenceId());
             
+            // 新增：检查地理围栏类型，只有限制区可以绑定无人机
+            if (geofence.getGeofenceType() != Geofence.GeofenceType.RESTRICTED_ZONE) {
+                String typeName = getGeofenceTypeName(geofence.getGeofenceType());
+                log.warn("Cannot bind drones to geofence type: {}", geofence.getGeofenceType());
+                throw new BusinessException(String.format("%s不需要关联无人机，只有限制区才能关联无人机", typeName));
+            }
+            
             // 优化：一次性查询所有需要的无人机，避免 N+1 查询问题
             List<Drone> drones = droneRepository.findAllById(droneIds);
             log.info("Found {} drones out of {} requested", drones.size(), droneIds.size());
@@ -353,6 +409,22 @@ public class GeofenceServiceImpl implements GeofenceService {
         } catch (Exception e) {
             log.error("Error binding drones to geofence: {}", e.getMessage(), e);
             throw e;
+        }
+    }
+    
+    /**
+     * 获取地理围栏类型的中文名称
+     */
+    private String getGeofenceTypeName(Geofence.GeofenceType type) {
+        switch (type) {
+            case NO_FLY_ZONE:
+                return "禁飞区";
+            case FLY_ZONE:
+                return "允飞区";
+            case RESTRICTED_ZONE:
+                return "限制区";
+            default:
+                return "未知类型";
         }
     }
 } 

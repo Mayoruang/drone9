@@ -4,7 +4,7 @@ import { notification } from 'ant-design-vue';
 import axios from 'axios';
 
 // 无人机状态类型
-export type DroneStatus = 'FLYING' | 'IDLE' | 'LOW_BATTERY' | 'TRAJECTORY_ERROR' | 'OFFLINE' | 'ONLINE' | 'ERROR';
+export type DroneStatus = 'FLYING' | 'IDLE' | 'LOW_BATTERY' | 'TRAJECTORY_ERROR' | 'OFFLINE' | 'ONLINE' | 'ERROR' | 'GEOFENCE_VIOLATION';
 
 // 无人机数据接口
 export interface DroneData {
@@ -64,7 +64,8 @@ export const statusColors = {
   TRAJECTORY_ERROR: '#ff4d4f', // 红色 - 轨迹异常警告
   OFFLINE: '#d9d9d9',     // 灰色 - 离线
   ONLINE: '#52c41a',      // 绿色 - 在线
-  ERROR: '#ff4d4f'        // 红色 - 错误
+  ERROR: '#ff4d4f',       // 红色 - 错误
+  GEOFENCE_VIOLATION: '#ff4d4f' // 红色 - 禁飞区违规
 };
 
 // 状态对应的中文描述

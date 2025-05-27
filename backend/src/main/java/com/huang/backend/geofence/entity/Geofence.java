@@ -136,7 +136,7 @@ public class Geofence {
     /**
      * Set of drones assigned to this geofence
      */
-    @ManyToMany
+    @ManyToMany(cascade = {CascadeType.DETACH, CascadeType.REFRESH})
     @JoinTable(
             name = "drone_geofence",
             joinColumns = @JoinColumn(name = "geofence_id"),
@@ -172,8 +172,8 @@ public class Geofence {
      * Enum for geofence types
      */
     public enum GeofenceType {
-        NO_FLY_ZONE,     // 禁飞区
-        FLY_ZONE,        // 允飞区
-        RESTRICTED_ZONE  // 限飞区
+        NO_FLY_ZONE,     // 禁飞区 - 禁止一切无人机进入，不需要关联无人机
+        FLY_ZONE,        // 允飞区 - 不限制任何无人机在此处飞行，不需要关联无人机
+        RESTRICTED_ZONE  // 限制区 - 仅对有权限的飞机开放权限，需要关联无人机
     }
 } 

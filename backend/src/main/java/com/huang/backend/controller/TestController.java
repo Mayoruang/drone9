@@ -9,6 +9,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
 
 import java.time.ZonedDateTime;
@@ -37,6 +38,7 @@ public class TestController {
      * @return response with the result
      */
     @GetMapping("/delete-drone/{droneId}")
+    @Transactional
     public ResponseEntity<DroneDeleteResponseDto> deleteDroneNoAuth(@PathVariable UUID droneId) {
         log.info("Test API - Deleting drone: {}", droneId);
         
@@ -55,6 +57,15 @@ public class TestController {
                         .success(false)
                         .message("Cannot delete drone while it is flying")
                         .build());
+            }
+            
+            // Clear geofence associations to avoid foreign key constraint violations
+            log.info("Test API - Clearing geofence associations for drone: {}", serialNumber);
+            if (drone.getGeofences() != null && !drone.getGeofences().isEmpty()) {
+                int associationCount = drone.getGeofences().size();
+                drone.getGeofences().clear();
+                droneRepository.save(drone); // Save to clear the associations
+                log.info("Test API - Cleared {} geofence associations for drone: {}", associationCount, serialNumber);
             }
             
             // Delete the drone entity

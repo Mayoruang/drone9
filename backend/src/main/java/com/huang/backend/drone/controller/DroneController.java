@@ -4,6 +4,7 @@ import com.huang.backend.drone.dto.DroneStatusDto;
 import com.huang.backend.drone.dto.DroneTelemetryDto;
 import com.huang.backend.drone.dto.DroneStatsDto;
 import com.huang.backend.drone.entity.Drone;
+import com.huang.backend.drone.repository.DroneRepository;
 import com.huang.backend.drone.service.DroneStatusService;
 import com.huang.backend.drone.service.DroneInfluxDBService;
 import com.huang.backend.geofence.dto.GeofenceListItemDto;
@@ -20,12 +21,14 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.http.ResponseEntity;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.stream.Collectors;
+import java.util.Optional;
 
 /**
  * 统一的无人机API控制器
@@ -40,6 +43,7 @@ public class DroneController {
     private final DroneStatusService droneStatusService;
     private final DroneInfluxDBService droneInfluxDBService;
     private final GeofenceService geofenceService;
+    private final DroneRepository droneRepository;
 
     /**
      * 获取所有无人机列表
@@ -117,46 +121,60 @@ public class DroneController {
     }
 
     /**
-     * 发送无人机命令
-     * @param droneId 无人机ID
-     * @param command 命令内容
-     * @return 操作响应
-     */
-    @PostMapping("/{droneId}/commands")
-    public ResponseEntity<CommandResponse> sendDroneCommand(
-            @PathVariable UUID droneId,
-            @RequestBody DroneCommandRequest command) {
-        log.info("Sending command to drone: {}, command: {}", droneId, command.getType());
-        
-        CommandResponse response = CommandResponse.builder()
-                .success(true)
-                .message("命令发送成功")
-                .commandId(UUID.randomUUID().toString())
-                .build();
-        
-        return ResponseEntity.ok(response);
-    }
-
-    /**
      * 更新无人机状态
      * @param droneId 无人机ID
      * @param request 状态更新请求
      * @return 操作响应
      */
     @PutMapping("/{droneId}/status")
+    @Transactional
     public ResponseEntity<StatusUpdateResponse> updateDroneStatus(
             @PathVariable UUID droneId,
             @RequestBody StatusUpdateRequest request) {
         log.info("Updating status for drone: {}, new status: {}", droneId, request.getStatus());
         
-        StatusUpdateResponse response = StatusUpdateResponse.builder()
-                .success(true)
-                .message("状态更新成功")
-                .droneId(droneId)
-                .newStatus(request.getStatus())
-                .build();
-        
-        return ResponseEntity.ok(response);
+        try {
+            // 查找无人机
+            Optional<Drone> droneOpt = droneRepository.findById(droneId);
+            if (droneOpt.isEmpty()) {
+                StatusUpdateResponse response = StatusUpdateResponse.builder()
+                        .success(false)
+                        .message("无人机不存在")
+                        .droneId(droneId)
+                        .newStatus(null)
+                        .build();
+                return ResponseEntity.notFound().build();
+            }
+            
+            Drone drone = droneOpt.get();
+            Drone.DroneStatus oldStatus = drone.getCurrentStatus();
+            
+            // 更新状态
+            drone.setCurrentStatus(request.getStatus());
+            droneRepository.save(drone);
+            
+            log.info("Successfully updated drone {} status from {} to {}", 
+                    drone.getSerialNumber(), oldStatus, request.getStatus());
+            
+            StatusUpdateResponse response = StatusUpdateResponse.builder()
+                    .success(true)
+                    .message("状态更新成功")
+                    .droneId(droneId)
+                    .newStatus(request.getStatus())
+                    .build();
+            
+            return ResponseEntity.ok(response);
+            
+        } catch (Exception e) {
+            log.error("Error updating drone status for {}: {}", droneId, e.getMessage(), e);
+            StatusUpdateResponse response = StatusUpdateResponse.builder()
+                    .success(false)
+                    .message("状态更新失败: " + e.getMessage())
+                    .droneId(droneId)
+                    .newStatus(null)
+                    .build();
+            return ResponseEntity.internalServerError().body(response);
+        }
     }
 
     /**
@@ -305,25 +323,6 @@ public class DroneController {
     @AllArgsConstructor
     public static class BatchTelemetryRequest {
         private List<UUID> droneIds;
-    }
-
-    @Data
-    @Builder
-    @NoArgsConstructor
-    @AllArgsConstructor
-    public static class DroneCommandRequest {
-        private String type;
-        private Map<String, Object> parameters;
-    }
-
-    @Data
-    @Builder
-    @NoArgsConstructor
-    @AllArgsConstructor
-    public static class CommandResponse {
-        private boolean success;
-        private String message;
-        private String commandId;
     }
 
     @Data

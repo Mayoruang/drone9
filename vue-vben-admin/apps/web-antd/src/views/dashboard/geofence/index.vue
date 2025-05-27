@@ -1,5 +1,5 @@
 <script lang="ts" setup>
-import { computed, onMounted, reactive, ref } from 'vue';
+import { computed, onMounted, reactive, ref, watch } from 'vue';
 
 import { PlusOutlined } from '@ant-design/icons-vue';
 import {
@@ -33,6 +33,7 @@ interface ExtendedGeofenceData extends GeofenceData {
   altitudeMax?: number;
   priority?: number;
   areaSquareMeters?: number;
+  center: [number, number];
 }
 
 // 无人机数据类型（用于关联选择）
@@ -168,6 +169,21 @@ const loadGeofences = async () => {
           altitudeMax: item.altitudeMax,
           priority: item.priority,
           areaSquareMeters: item.areaSquareMeters,
+          // 添加center字段 - 使用后端提供的center或计算得出
+          center: (() => {
+            // 优先使用后端提供的center
+            if (item.center && Array.isArray(item.center) && item.center.length === 2) {
+              return [item.center[0], item.center[1]] as [number, number];
+            }
+            // 如果后端没有提供center，从coordinates计算
+            if (coordinates.length > 0) {
+              const avgLng = coordinates.reduce((sum, coord) => sum + coord.lng, 0) / coordinates.length;
+              const avgLat = coordinates.reduce((sum, coord) => sum + coord.lat, 0) / coordinates.length;
+              return [avgLng, avgLat] as [number, number];
+            }
+            // 默认值
+            return [0, 0] as [number, number];
+          })(),
         };
       });
 
@@ -304,10 +320,16 @@ const cancelDrawing = () => {
 
 // 保存地理围栏 - 使用真实API
 const saveGeofence = async () => {
+  console.log('🎯 开始保存地理围栏...');
+  console.log('表单数据:', geofenceForm);
+  console.log('绘制数据:', editingGeofence.value);
+
+  // 基本验证
   if (!geofenceForm.name.trim()) {
     notification.error({
       message: '请输入地理围栏名称',
     });
+    console.log('❌ 验证失败：围栏名称为空');
     return;
   }
 
@@ -315,13 +337,27 @@ const saveGeofence = async () => {
     notification.error({
       message: '绘制数据丢失，请重新绘制',
     });
+    console.log('❌ 验证失败：绘制数据丢失');
     return;
   }
 
-  try {
-    loading.value = true;
+  // 验证限制区必须关联无人机
+  if (geofenceForm.type === 'RESTRICTED_ZONE' &&
+      (!geofenceForm.droneIds || geofenceForm.droneIds.length === 0)) {
+    notification.error({
+      message: '限制区必须关联无人机',
+      description: '请选择至少一个有权限在此限制区飞行的无人机',
+    });
+    console.log('❌ 验证失败：限制区未关联无人机');
+    return;
+  }
 
-    // 第一步：创建地理围栏（不包含droneIds）
+  // 设置加载状态
+  loading.value = true;
+  console.log('⏳ 设置loading状态为true');
+
+  try {
+    // 根据地理围栏类型决定是否包含droneIds
     const createData = {
       name: geofenceForm.name,
       type: geofenceForm.type,
@@ -329,34 +365,36 @@ const saveGeofence = async () => {
       description: geofenceForm.description,
       altitudeMin: geofenceForm.altitudeMin,
       altitudeMax: geofenceForm.altitudeMax,
-      // 不包含droneIds，避免400错误
+      // 只有限制区才包含droneIds
+      ...(geofenceForm.type === 'RESTRICTED_ZONE' && { droneIds: geofenceForm.droneIds })
     };
 
-    console.log('Creating geofence with data:', createData);
+    console.log('📤 发送创建请求，数据:', createData);
     const response = await createGeofence(createData);
-    console.log('Create geofence response:', response);
+    console.log('📥 收到创建响应:', response);
 
-    // 检查响应是否成功（response已经是解包后的数据）
+    // 检查响应是否成功
     if (response && response.success) {
+      console.log('✅ 地理围栏创建成功');
       const geofenceId = response.geofenceId;
 
       // 第二步：如果有选择的无人机，进行绑定操作
       if (geofenceForm.droneIds && geofenceForm.droneIds.length > 0 && geofenceId) {
         try {
-          console.log('Binding drones to geofence:', geofenceForm.droneIds);
+          console.log('🔗 开始绑定无人机:', geofenceForm.droneIds);
           const bindResponse = await bindDronesToGeofence(geofenceId, geofenceForm.droneIds);
 
           if (bindResponse.success) {
-            console.log('Successfully bound drones to geofence');
+            console.log('✅ 无人机绑定成功');
           } else {
-            console.warn('Failed to bind drones:', bindResponse.message);
+            console.warn('⚠️ 无人机绑定失败:', bindResponse.message);
             notification.warning({
               message: '地理围栏创建成功，但无人机绑定失败',
               description: bindResponse.message || '部分功能可能不可用',
             });
           }
         } catch (bindError: any) {
-          console.error('Failed to bind drones to geofence:', bindError);
+          console.error('❌ 无人机绑定异常:', bindError);
 
           let bindErrorMessage = '无人机绑定失败，可以稍后在详情页面手动绑定无人机';
 
@@ -383,37 +421,62 @@ const saveGeofence = async () => {
         description: `${geofenceForm.name} 已添加到系统`,
       });
 
-      // 关闭模态框和重置状态
-      showGeofenceModal.value = false;
+      // 立即重置状态和关闭模态框
+      console.log('🔄 重置状态并关闭模态框');
+
+      // 重置表单数据
+      Object.assign(geofenceForm, {
+        name: '',
+        type: 'NO_FLY_ZONE',
+        description: '',
+        droneIds: [],
+        altitudeMin: undefined,
+        altitudeMax: undefined,
+      });
+
+      // 清除编辑状态
       editingGeofence.value = null;
+
+      // 关闭模态框
+      showGeofenceModal.value = false;
+      console.log('✅ 模态框已关闭，状态已重置');
 
       // 构建新的地理围栏对象并立即添加到列表和地图
       const newGeofence = {
         id: response.geofenceId || '', // 确保有默认值
-        name: geofenceForm.name,
-        type: geofenceForm.type,
+        name: createData.name,
+        type: createData.type,
         coordinates: createData.coordinates,
-        description: geofenceForm.description,
+        description: createData.description,
         createTime: new Date().toISOString(),
         thumbnail: undefined, // 缩略图将稍后异步生成
         droneIds: geofenceForm.droneIds || [],
         active: true,
-        altitudeMin: geofenceForm.altitudeMin,
-        altitudeMax: geofenceForm.altitudeMax,
+        altitudeMin: createData.altitudeMin,
+        altitudeMax: createData.altitudeMax,
         priority: 1,
         areaSquareMeters: undefined,
+        // 计算临时中心点（后端重新加载时会更新为准确值）
+        center: (() => {
+          const coords = createData.coordinates;
+          if (coords.length === 0) return [0, 0] as [number, number];
+          const avgLng = coords.reduce((sum, coord) => sum + coord.lng, 0) / coords.length;
+          const avgLat = coords.reduce((sum, coord) => sum + coord.lat, 0) / coords.length;
+          return [avgLng, avgLat] as [number, number];
+        })(),
       };
 
       // 立即添加到列表
-      geofenceList.value.push(newGeofence);
+      geofenceList.value.push(newGeofence as ExtendedGeofenceData);
+      console.log('📋 已添加到地理围栏列表');
 
       // 立即在地图上显示新围栏（只有在有有效ID时才添加）
       if (mapRef.value && mapRef.value.addGeofence && response.geofenceId) {
         try {
           mapRef.value.addGeofence(newGeofence);
-          console.log('Successfully added geofence to map:', response.geofenceId);
+          console.log('🗺️ 已添加到地图');
         } catch (error) {
-          console.warn('Failed to add geofence to map:', error);
+          console.warn('⚠️ 添加到地图失败:', error);
         }
       }
 
@@ -421,29 +484,32 @@ const saveGeofence = async () => {
       setTimeout(async () => {
         try {
           await loadGeofences();
-          console.log('Refreshed geofence list after creation');
+          console.log('🔄 已刷新地理围栏列表');
 
           // 刷新成功后，再次聚焦到新创建的地理围栏
           const updatedGeofence = geofenceList.value.find(g => g.id === response.geofenceId);
           if (updatedGeofence && mapRef.value && mapRef.value.focusGeofence) {
             mapRef.value.focusGeofence(updatedGeofence);
+            console.log('🎯 已聚焦到新围栏');
           }
         } catch (error) {
-          console.warn('Failed to refresh geofence list:', error);
+          console.warn('⚠️ 刷新围栏列表失败:', error);
           // 即使刷新失败，新围栏也已经显示了，不影响用户体验
         }
       }, 2000); // 延长到2秒，给缩略图生成更多时间
 
     } else {
       // 处理创建失败的情况
+      console.log('❌ 地理围栏创建失败');
       const errorMessage = response?.message || '创建地理围栏时发生未知错误';
       notification.error({
         message: '创建失败',
         description: errorMessage,
       });
+      // 创建失败时不关闭模态框，让用户可以修改后重试
     }
   } catch (error: any) {
-    console.error('Failed to create geofence:', error);
+    console.error('❌ 创建地理围栏异常:', error);
 
     // 提取错误信息
     let errorMessage = '无法创建地理围栏，请检查网络连接或稍后重试';
@@ -466,28 +532,50 @@ const saveGeofence = async () => {
       message: '创建失败',
       description: errorMessage,
     });
+    // 发生异常时不关闭模态框，让用户可以重试
   } finally {
+    // 无论成功失败都要重置loading状态
     loading.value = false;
+    console.log('⏳ 重置loading状态为false');
   }
 };
 
 // 取消地理围栏设置
 const cancelGeofenceForm = () => {
-  // 关闭模态框
-  showGeofenceModal.value = false;
+  console.log('🚫 取消地理围栏设置...');
+
+  // 重置表单数据
+  Object.assign(geofenceForm, {
+    name: '',
+    type: 'NO_FLY_ZONE',
+    description: '',
+    droneIds: [],
+    altitudeMin: undefined,
+    altitudeMax: undefined,
+  });
+  console.log('🔄 表单数据已重置');
 
   // 清除临时存储的围栏数据
   editingGeofence.value = null;
+  console.log('🗑️ 编辑数据已清除');
+
+  // 关闭模态框
+  showGeofenceModal.value = false;
+  console.log('❌ 模态框已关闭');
 
   // 使用强力清理方法确保完全清除所有绘制内容
-  mapRef.value?.forceClearAll();
+  if (mapRef.value?.forceClearAll) {
+    mapRef.value.forceClearAll();
+    console.log('🗺️ 地图绘制内容已清除');
+  }
 
   // 重置绘制状态
   isDrawing.value = false;
+  console.log('✅ 绘制状态已重置');
 
   notification.info({
     message: '已取消围栏设置',
-    description: '绘制的围栏已撤销',
+    description: '绘制的围栏已撤销，所有数据已清除',
   });
 };
 
@@ -566,6 +654,14 @@ const geofenceStats = computed(() => {
     flyZones,
     restrictedZones,
   };
+});
+
+// 监听地理围栏类型变化，自动清空无人机关联
+watch(() => geofenceForm.type, (newType) => {
+  // 如果不是限制区，清空无人机关联
+  if (newType !== 'RESTRICTED_ZONE') {
+    geofenceForm.droneIds = [];
+  }
 });
 
 // 键盘事件处理
@@ -714,17 +810,30 @@ onMounted(async () => {
           <Radio.Group v-model:value="geofenceForm.type">
             <Radio value="NO_FLY_ZONE">
               <span class="text-red-600">🚫 禁飞区</span>
-              <span class="ml-2 text-sm text-gray-500">完全禁止无人机进入和飞行</span>
-            </Radio>
-            <Radio value="RESTRICTED_ZONE">
-              <span class="text-yellow-600">⚠️ 限制区</span>
-              <span class="ml-2 text-sm text-gray-500">需要特殊权限才能进入</span>
+              <span class="ml-2 text-sm text-gray-500">禁止一切无人机进入</span>
             </Radio>
             <Radio value="FLY_ZONE">
               <span class="text-green-600">✅ 允飞区</span>
-              <span class="ml-2 text-sm text-gray-500">允许无人机自由飞行</span>
+              <span class="ml-2 text-sm text-gray-500">不限制任何无人机在此处飞行</span>
+            </Radio>
+            <Radio value="RESTRICTED_ZONE">
+              <span class="text-yellow-600">⚠️ 限制区</span>
+              <span class="ml-2 text-sm text-gray-500">仅对有权限的飞机开放权限</span>
             </Radio>
           </Radio.Group>
+
+          <!-- 类型说明 -->
+          <div class="mt-3 p-3 bg-gray-50 rounded-lg">
+            <div v-if="geofenceForm.type === 'NO_FLY_ZONE'" class="text-sm text-red-600">
+              <strong>禁飞区：</strong>禁止一切无人机进入，不需要关联无人机。
+            </div>
+            <div v-else-if="geofenceForm.type === 'FLY_ZONE'" class="text-sm text-green-600">
+              <strong>允飞区：</strong>不限制任何无人机在此处飞行，不需要关联无人机。
+            </div>
+            <div v-else-if="geofenceForm.type === 'RESTRICTED_ZONE'" class="text-sm text-yellow-600">
+              <strong>限制区：</strong>仅对有权限的飞机开放权限，需要关联具有权限的无人机。
+            </div>
+          </div>
         </Form.Item>
 
         <Form.Item label="高度限制" class="mb-4">
@@ -761,18 +870,35 @@ onMounted(async () => {
           </div>
         </Form.Item>
 
-        <Form.Item label="关联无人机">
+        <!-- 只有限制区才显示无人机关联选项 -->
+        <Form.Item v-if="geofenceForm.type === 'RESTRICTED_ZONE'" label="关联无人机" required>
           <Select
             v-model:value="geofenceForm.droneIds"
             mode="multiple"
-            placeholder="选择要应用此围栏的无人机"
+            placeholder="选择有权限在此限制区飞行的无人机"
             :options="droneList.map((drone) => ({
                 value: drone.id,
                 label: `${drone.serialNumber} - ${drone.name}`,
             }))"
             allow-clear
           />
+          <div class="mt-2 text-xs text-yellow-600 bg-yellow-50 p-2 rounded">
+            ⚠️ 限制区必须关联无人机，只有关联的无人机才能在此区域飞行
+          </div>
         </Form.Item>
+
+        <!-- 禁飞区和允飞区的说明 -->
+        <div v-else-if="geofenceForm.type === 'NO_FLY_ZONE'" class="mb-4">
+          <div class="text-xs text-red-600 bg-red-50 p-2 rounded">
+            🚫 禁飞区不需要关联无人机，将禁止所有无人机进入
+          </div>
+        </div>
+
+        <div v-else-if="geofenceForm.type === 'FLY_ZONE'" class="mb-4">
+          <div class="text-xs text-green-600 bg-green-50 p-2 rounded">
+            ✅ 允飞区不需要关联无人机，所有无人机都可以在此区域自由飞行
+          </div>
+        </div>
 
         <Form.Item label="描述">
           <Input.TextArea

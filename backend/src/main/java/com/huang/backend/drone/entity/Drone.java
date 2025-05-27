@@ -77,7 +77,7 @@ public class Drone {
     /**
      * Set of geofences associated with this drone
      */
-    @ManyToMany(mappedBy = "drones")
+    @ManyToMany(mappedBy = "drones", cascade = {CascadeType.DETACH, CascadeType.REFRESH})
     private Set<Geofence> geofences = new HashSet<>();
 
     @Column(name = "created_at", nullable = false)
@@ -94,7 +94,10 @@ public class Drone {
         ONLINE,
         FLYING,
         IDLE,
-        ERROR
+        ERROR,
+        LOW_BATTERY,
+        TRAJECTORY_ERROR,
+        GEOFENCE_VIOLATION
     }
 
     /**

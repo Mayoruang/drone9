@@ -49,6 +49,20 @@ public class ApiExceptionHandler {
     }
     
     /**
+     * Handle BusinessException - business logic violations
+     */
+    @ExceptionHandler(BusinessException.class)
+    public ResponseEntity<ApiError> handleBusinessException(BusinessException ex) {
+        ApiError apiError = ApiError.builder()
+                .message(ex.getMessage())
+                .status(HttpStatus.BAD_REQUEST.value())
+                .timestamp(ZonedDateTime.now())
+                .build();
+        
+        return new ResponseEntity<>(apiError, HttpStatus.BAD_REQUEST);
+    }
+    
+    /**
      * Handle bean validation exceptions
      */
     @ExceptionHandler(MethodArgumentNotValidException.class)
@@ -79,7 +93,7 @@ public class ApiExceptionHandler {
         log.error("Unexpected error occurred: {}", ex.getMessage(), ex);
         
         ApiError apiError = ApiError.builder()
-                .message("分配地理围栏时发生错误: " + ex.getMessage())
+                .message("服务器内部错误: " + ex.getMessage())
                 .status(HttpStatus.INTERNAL_SERVER_ERROR.value())
                 .timestamp(ZonedDateTime.now())
                 .build();

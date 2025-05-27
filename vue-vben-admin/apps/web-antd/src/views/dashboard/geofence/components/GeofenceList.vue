@@ -29,6 +29,7 @@ interface ExtendedGeofenceData extends GeofenceData {
   altitudeMax?: number;
   priority?: number;
   areaSquareMeters?: number;
+  center: [number, number]; // 中心点坐标 [lng, lat]
 }
 
 // 定义组件属性
@@ -149,9 +150,9 @@ const generateRealMapThumbnail = (geofence: ExtendedGeofenceData, isLarge: boole
   const minLat = Math.min(...lats);
   const maxLat = Math.max(...lats);
 
-  // 计算地理中心点
-  const centerLng = (minLng + maxLng) / 2;
-  const centerLat = (minLat + maxLat) / 2;
+  // 使用后端提供的中心点（已经计算好的质心）
+  const centerLng = geofence.center[0];
+  const centerLat = geofence.center[1];
 
   // 考虑纬度修正，避免形状拉伸
   const latCorrection = Math.cos((centerLat * Math.PI) / 180);
@@ -304,13 +305,9 @@ const getCoordinatesSummary = (
   coordinates: Array<{ lat: number; lng: number }>,
 ) => {
   if (coordinates.length === 0) return '无坐标';
-
-  const lngs = coordinates.map((c) => c.lng);
-  const lats = coordinates.map((c) => c.lat);
-  const centerLng = (Math.min(...lngs) + Math.max(...lngs)) / 2;
-  const centerLat = (Math.min(...lats) + Math.max(...lats)) / 2;
-
-  return `${centerLat.toFixed(4)}, ${centerLng.toFixed(4)}`;
+  
+  // 直接显示顶点数量（后端已经移除了重复的闭合点）
+  return `${coordinates.length} 个顶点`;
 };
 
 // 定位到地理围栏

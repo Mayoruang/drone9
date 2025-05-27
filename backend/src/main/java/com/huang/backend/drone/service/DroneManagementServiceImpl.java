@@ -172,6 +172,15 @@ public class DroneManagementServiceImpl implements DroneManagementService {
                 }
             }
             
+            // Clear geofence associations to avoid foreign key constraint violations
+            log.info("Clearing geofence associations for drone: {}", serialNumber);
+            if (drone.getGeofences() != null && !drone.getGeofences().isEmpty()) {
+                int associationCount = drone.getGeofences().size();
+                drone.getGeofences().clear();
+                droneRepository.save(drone); // Save to clear the associations
+                log.info("Cleared {} geofence associations for drone: {}", associationCount, serialNumber);
+            }
+            
             // Delete the drone (PostgreSQL)
             droneRepository.delete(drone);
 

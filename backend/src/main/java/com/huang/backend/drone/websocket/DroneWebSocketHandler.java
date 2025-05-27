@@ -56,7 +56,8 @@ public class DroneWebSocketHandler {
             // Collect telemetry data for each drone
             List<Map<String, Object>> dronePositions = drones.stream()
                 .map(drone -> {
-                    DroneTelemetryDto telemetry = droneInfluxDBService.getLatestTelemetry(drone.getSerialNumber());
+                    // 使用UUID而不是序列号来查询InfluxDB，因为存储时使用的是UUID
+                    DroneTelemetryDto telemetry = droneInfluxDBService.getLatestTelemetry(drone.getDroneId().toString());
                     if (telemetry != null) {
                         Map<String, Object> positionData = new HashMap<>();
                         positionData.put("droneId", drone.getDroneId());

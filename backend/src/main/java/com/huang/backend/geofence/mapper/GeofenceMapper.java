@@ -17,6 +17,7 @@ import org.wololo.geojson.GeoJSON;
 import org.wololo.jts2geojson.GeoJSONReader;
 import org.wololo.jts2geojson.GeoJSONWriter;
 
+import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
 
@@ -140,7 +141,32 @@ public class GeofenceMapper {
             GeoJSONWriter writer = new GeoJSONWriter();
             GeoJSON json = writer.write(polygon);
             String geoJsonString = json.toString();
-            return objectMapper.readValue(geoJsonString, Map.class);
+            Map<String, Object> geoJsonMap = objectMapper.readValue(geoJsonString, Map.class);
+            
+            // 修复：移除重复的闭合点以正确显示顶点数量
+            if (geoJsonMap.containsKey("coordinates")) {
+                List<List<List<Double>>> coordinates = (List<List<List<Double>>>) geoJsonMap.get("coordinates");
+                if (!coordinates.isEmpty() && !coordinates.get(0).isEmpty()) {
+                    List<List<Double>> ring = coordinates.get(0);
+                    if (ring.size() > 1) {
+                        List<Double> firstPoint = ring.get(0);
+                        List<Double> lastPoint = ring.get(ring.size() - 1);
+                        
+                        // 如果第一个点和最后一个点相同，移除最后一个点
+                        if (firstPoint != null && lastPoint != null &&
+                            firstPoint.size() >= 2 && lastPoint.size() >= 2 &&
+                            Math.abs(firstPoint.get(0) - lastPoint.get(0)) < 1e-10 &&
+                            Math.abs(firstPoint.get(1) - lastPoint.get(1)) < 1e-10) {
+                            
+                            log.debug("移除重复的闭合点，原始顶点: {}, 修正后顶点: {}", 
+                                    ring.size(), ring.size() - 1);
+                            ring.remove(ring.size() - 1);
+                        }
+                    }
+                }
+            }
+            
+            return geoJsonMap;
         } catch (Exception e) {
             throw new RuntimeException("Error converting geometry to GeoJSON", e);
         }

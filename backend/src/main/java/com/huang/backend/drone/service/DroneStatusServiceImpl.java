@@ -76,7 +76,8 @@ public class DroneStatusServiceImpl implements DroneStatusService {
         Drone drone = droneRepository.findById(droneId)
                 .orElseThrow(() -> new NoSuchElementException("Drone not found with ID: " + droneId));
         
-        return influxDBService.getLatestTelemetry(drone.getSerialNumber());
+        // 使用UUID而不是序列号来查询InfluxDB，因为存储时使用的是UUID
+        return influxDBService.getLatestTelemetry(drone.getDroneId().toString());
     }
 
     @Override
@@ -87,7 +88,8 @@ public class DroneStatusServiceImpl implements DroneStatusService {
         Drone drone = droneRepository.findById(droneId)
                 .orElseThrow(() -> new NoSuchElementException("Drone not found with ID: " + droneId));
         
-        return influxDBService.getTelemetryHistory(drone.getSerialNumber(), start, end, limit);
+        // 使用UUID而不是序列号来查询InfluxDB，因为存储时使用的是UUID
+        return influxDBService.getTelemetryHistory(drone.getDroneId().toString(), start, end, limit);
     }
     
     /**
@@ -101,13 +103,19 @@ public class DroneStatusServiceImpl implements DroneStatusService {
         
         try {
             // Get latest telemetry to enhance the status
-            DroneTelemetryDto telemetry = influxDBService.getLatestTelemetry(drone.getSerialNumber());
+            // 使用UUID而不是序列号来查询InfluxDB，因为存储时使用的是UUID
+            DroneTelemetryDto telemetry = influxDBService.getLatestTelemetry(drone.getDroneId().toString());
             
             if (telemetry != null) {
                 dto.setBatteryLevel(telemetry.getBatteryLevel());
                 dto.setLatitude(telemetry.getLatitude());
                 dto.setLongitude(telemetry.getLongitude());
                 dto.setAltitude(telemetry.getAltitude());
+                log.debug("成功获取无人机{}({})的遥测数据，电量: {}%", 
+                        drone.getSerialNumber(), drone.getDroneId(), telemetry.getBatteryLevel());
+            } else {
+                log.debug("未找到无人机{}({})的遥测数据", 
+                        drone.getSerialNumber(), drone.getDroneId());
             }
         } catch (Exception e) {
             log.warn("Error enriching drone status with telemetry for drone {}: {}", 

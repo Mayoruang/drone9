@@ -121,7 +121,7 @@ interface LoginResponse {
 // ============================================================================
 
 /** 无人机状态枚举 */
-type DroneStatus = 'OFFLINE' | 'ONLINE' | 'FLYING' | 'IDLE' | 'ERROR' | 'LOW_BATTERY' | 'TRAJECTORY_ERROR';
+type DroneStatus = 'OFFLINE' | 'ONLINE' | 'FLYING' | 'IDLE' | 'ERROR' | 'LOW_BATTERY' | 'TRAJECTORY_ERROR' | 'GEOFENCE_VIOLATION';
 
 /** 飞行模式枚举 */
 type FlightMode = 'MANUAL' | 'AUTO' | 'GUIDED' | 'STABILIZE' | 'LAND' | 'RTL' | 'HOLD';

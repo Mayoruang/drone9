@@ -66,6 +66,28 @@ export const DRONE_API = {
   STATS: '/v1/drones/stats',
   /** 连接测试 */
   TEST: '/v1/drones/test',
+  
+  // 无人机控制命令API
+  /** 发送原始JSON命令 */
+  RAW_COMMAND: (id: string) => `/v1/drones/${id}/commands/raw`,
+  /** 紧急停止 */
+  EMERGENCY_STOP: (id: string) => `/v1/drones/${id}/commands/emergency-stop`,
+  /** 返航 */
+  RETURN_TO_HOME: (id: string) => `/v1/drones/${id}/commands/return-to-home`,
+  /** 降落 */
+  LAND: (id: string) => `/v1/drones/${id}/commands/land`,
+  /** 悬停 */
+  HOVER: (id: string) => `/v1/drones/${id}/commands/hover`,
+  /** 获取命令历史 */
+  COMMAND_HISTORY: (id: string) => `/v1/drones/${id}/commands/history`,
+  /** 检查可用性 */
+  AVAILABILITY: (id: string) => `/v1/drones/${id}/commands/availability`,
+  /** 取消命令 */
+  CANCEL_COMMAND: (droneId: string, commandId: string) => `/v1/drones/${droneId}/commands/${commandId}`,
+  /** 获取命令状态 */
+  COMMAND_STATUS: (droneId: string, commandId: string) => `/v1/drones/${droneId}/commands/${commandId}`,
+  /** 获取可用命令 */
+  AVAILABLE_COMMANDS: (id: string) => `/v1/drones/${id}/commands/available`,
 } as const;
 
 /** 用户认证相关API端点 */
@@ -106,6 +128,18 @@ export const SYSTEM_API = {
   INFO: '/v1/system/info',
   /** 日志管理 */
   LOGS: '/v1/system/logs',
+} as const;
+
+/** 紧急操作相关API端点 */
+export const EMERGENCY_API = {
+  /** 基础路径 */
+  BASE: '/v1/emergency',
+  /** 紧急停止所有无人机 */
+  STOP_ALL: '/v1/emergency/stop-all',
+  /** 强制降落所有无人机 */
+  LAND_ALL: '/v1/emergency/land-all',
+  /** 获取紧急系统状态 */
+  STATUS: '/v1/emergency/status',
 } as const;
 
 // ============================================================================
@@ -316,6 +350,7 @@ export default {
   AUTH_API,
   REGISTRATION_API,
   SYSTEM_API,
+  EMERGENCY_API,
   WS_ENDPOINTS,
   REQUEST_CONFIG,
   WS_CONFIG,

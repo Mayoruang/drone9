@@ -17,6 +17,27 @@ import {
   updateGeofenceAssignments,
   type GeofenceListItem,
   type GeofenceAssignmentResponse,
+  // 新增无人机控制相关API导入
+  sendDroneControlCommand,
+  sendRawCommand as apiSendRawCommand,
+  emergencyStopDrone,
+  returnToHome,
+  landDrone,
+  hoverDrone,
+  getDroneCommandHistory,
+  checkDroneAvailability,
+  cancelDroneCommand,
+  emergencyStopAll,
+  createDroneCommand,
+  createMoveToCommand,
+  createTakeoffCommand,
+  createPatrolCommand,
+  createSetAltitudeCommand,
+  createSetSpeedCommand,
+  formatCommandStatus,
+  type DroneCommand,
+  type DroneAvailability,
+  type DroneCommandResponse
 } from '#/api/drone';
 // 添加地理围栏页面的API导入
 import {
@@ -25,7 +46,7 @@ import {
 } from '#/api/geofence';
 
 // 无人机状态类型
-type DroneStatus = 'FLYING' | 'IDLE' | 'LOW_BATTERY' | 'TRAJECTORY_ERROR' | 'OFFLINE';
+type DroneStatus = 'FLYING' | 'IDLE' | 'LOW_BATTERY' | 'TRAJECTORY_ERROR' | 'OFFLINE' | 'GEOFENCE_VIOLATION';
 
 // 无人机数据接口
 interface DroneData {
@@ -86,12 +107,14 @@ type DangerButtonType = ButtonType | 'danger';
 const loading = ref(false);
 const map = ref<any>(null);
 const droneMarkers = ref<any[]>([]);
+const geofenceOverlays = ref<any[]>([]); // 添加地理围栏覆盖物数组
 const drawerVisible = ref(false);
 const selectedDrone = ref<DroneData | null>(null);
 const activeTabKey = ref('1');
 const commandMessage = ref('');
 const geofenceActive = ref(false);
 const geofenceRadius = ref(500); // 默认500米
+const showDroneGeofences = ref(true); // 添加控制是否显示无人机关联地理围栏的开关
 const mockDrones = ref<DroneData[]>([]);
 const realDrones = ref<Record<string, DroneData>>({});
 const useRealData = ref(true); // 默认使用真实数据，改为true
@@ -121,13 +144,49 @@ const offlineReason = ref('');
 const processingOffline = ref(false);
 const offlineDroneId = ref('');
 
+// ===== 遥控器相关状态 =====
+const availability = ref<DroneAvailability | null>(null);
+const commandHistory = ref<DroneCommand[]>([]);
+const lastResponse = ref<string>('');
+
+// 加载状态
+const commandLoading = ref(false);
+const emergencyLoading = ref(false);
+const availabilityLoading = ref(false);
+const historyLoading = ref(false);
+
+// 界面状态
+const controlActiveTab = ref('movement');
+const takeoffDialogVisible = ref(false);
+const takeoffAltitude = ref(30);
+
+// 命令参数
+const gotoParams = reactive({
+  latitude: null as number | null,
+  longitude: null as number | null,
+  altitude: 25,
+  speed: 5
+});
+
+const patrolParams = reactive({
+  trajectoryType: 'RECTANGLE',
+  size: 100,
+  altitude: 30,
+  speed: 5
+});
+
+const altitudeValue = ref<number | null>(null);
+const speedValue = ref<number | null>(null);
+const rawCommand = ref('{\n  "action": "LAND",\n  "parameters": {}\n}');
+
 // 状态对应的颜色
 const statusColors = {
   FLYING: '#1890ff', // 蓝色 - 正常执行任务
   IDLE: '#52c41a',   // 绿色 - 地面待命
   LOW_BATTERY: '#faad14', // 黄色 - 低电量警告
   TRAJECTORY_ERROR: '#ff4d4f', // 红色 - 轨迹异常警告
-  OFFLINE: '#d9d9d9' // 灰色 - 离线
+  OFFLINE: '#d9d9d9', // 灰色 - 离线
+  GEOFENCE_VIOLATION: '#ff4d4f' // 红色 - 禁飞区违规
 };
 
 // 状态对应的中文描述
@@ -136,7 +195,8 @@ const statusText = {
   IDLE: '地面待命',
   LOW_BATTERY: '低电量警告',
   TRAJECTORY_ERROR: '轨迹异常警告',
-  OFFLINE: '离线'
+  OFFLINE: '离线',
+  GEOFENCE_VIOLATION: '禁飞区违规'
 };
 
 // 获取状态标签样式
@@ -162,6 +222,90 @@ const activeDrones = computed(() => {
   console.log(`活跃无人机数量: ${drones.length}`);
   return drones;
 });
+
+// ===== 遥控器相关计算属性 =====
+const canSendCommand = computed(() => {
+  return selectedDrone.value && 
+         availability.value?.available !== false && 
+         !commandLoading.value;
+});
+
+const isGotoValid = computed(() => {
+  return gotoParams.latitude !== null && 
+         gotoParams.longitude !== null &&
+         gotoParams.latitude >= -90 && gotoParams.latitude <= 90 &&
+         gotoParams.longitude >= -180 && gotoParams.longitude <= 180;
+});
+
+// 计算属性用于处理null值转换
+const latitudeDisplay = computed({
+  get: () => gotoParams.latitude?.toString() || '',
+  set: (value: string) => {
+    gotoParams.latitude = value ? parseFloat(value) : null;
+  }
+});
+
+const longitudeDisplay = computed({
+  get: () => gotoParams.longitude?.toString() || '',
+  set: (value: string) => {
+    gotoParams.longitude = value ? parseFloat(value) : null;
+  }
+});
+
+const altitudeDisplay = computed({
+  get: () => altitudeValue.value?.toString() || '',
+  set: (value: string) => {
+    altitudeValue.value = value ? parseFloat(value) : null;
+  }
+});
+
+const speedDisplay = computed({
+  get: () => speedValue.value?.toString() || '',
+  set: (value: string) => {
+    speedValue.value = value ? parseFloat(value) : null;
+  }
+});
+
+// ===== 遥控器工具函数 =====
+const formatTime = (timestamp: string) => {
+  return new Date(timestamp).toLocaleString();
+};
+
+const formatPosition = (position: any) => {
+  if (!position) return '未知';
+  return `${position.latitude?.toFixed(6)}, ${position.longitude?.toFixed(6)} (${position.altitude}m)`;
+};
+
+const getDroneStatusColor = (status: string) => {
+  const colors: Record<string, string> = {
+    'ONLINE': 'green',
+    'FLYING': 'blue',
+    'IDLE': 'cyan',
+    'OFFLINE': 'red',
+    'ERROR': 'red',
+    'LOW_BATTERY': 'orange'
+  };
+  return colors[status] || 'default';
+};
+
+const getCommandStatusColor = (status: string) => {
+  const colors: Record<string, string> = {
+    'PENDING': 'orange',
+    'SENT': 'blue',
+    'RECEIVED': 'cyan',
+    'EXECUTING': 'purple',
+    'COMPLETED': 'green',
+    'FAILED': 'red',
+    'CANCELLED': 'default',
+    'TIMEOUT': 'volcano'
+  };
+  return colors[status] || 'default';
+};
+
+const updateResponse = (title: string, content: any) => {
+  const timestamp = new Date().toLocaleString();
+  lastResponse.value = `[${timestamp}] ${title}:\n${JSON.stringify(content, null, 2)}`;
+};
 
 // 调用后端生成单次无人机数据
 const generateDroneData = async () => {
@@ -230,6 +374,14 @@ const handleMarkerClick = (drone: DroneData) => {
   console.log('标记被点击', drone);
   selectedDrone.value = drone;
   drawerVisible.value = true;
+  
+  // 当选中无人机时，自动加载并显示其关联的地理围栏
+  if (showDroneGeofences.value) {
+    // 延迟加载地理围栏，确保地图已经准备好
+    setTimeout(() => {
+      updateDroneGeofenceDisplay();
+    }, 100);
+  }
 };
 
 // 修改WebSocket连接逻辑
@@ -407,6 +559,13 @@ const handleDronePositionUpdate = (positions: TelemetryData[]) => {
       return;
     }
 
+    // 🔍 添加电量数据调试日志
+    console.log(`🔋 无人机 ${droneId} 电量数据检查:`, {
+      batteryLevel: data.batteryLevel,
+      batteryLevel_type: typeof data.batteryLevel,
+      raw_data: data
+    });
+
     updatedDroneIds.add(droneId);
 
     // 使用后端提供的时间戳或当前时间作为备用
@@ -421,20 +580,23 @@ const handleDronePositionUpdate = (positions: TelemetryData[]) => {
         model: data.model || 'Unknown Model',
         status: data.status || 'FLYING',
         batteryPercentage: data.batteryLevel || 0,
-      position: {
+        position: {
           latitude: data.latitude || 0,
           longitude: data.longitude || 0,
           altitude: data.altitude || 0,
         },
         speed: data.speed || 0,
         lastHeartbeat: lastHeartbeat,
-      mqtt: {
+        mqtt: {
           username: '',
           topicTelemetry: `drones/${droneId}/telemetry`,
           topicCommands: `drones/${droneId}/commands`,
         },
         flightMode: data.flightMode || 'UNKNOWN'
       };
+
+      // 🔍 添加新创建无人机的电量日志
+      console.log(`✅ 新无人机 ${droneId} 初始电量: ${realDrones.value[droneId].batteryPercentage}%`);
 
       // 新无人机通知
       notification.success({
@@ -445,13 +607,18 @@ const handleDronePositionUpdate = (positions: TelemetryData[]) => {
     } else {
       // 更新现有无人机记录
       const drone = realDrones.value[droneId];
+      const oldBattery = drone.batteryPercentage;
 
       // 更新位置和遥测数据
       if (data.latitude !== undefined) drone.position.latitude = data.latitude;
       if (data.longitude !== undefined) drone.position.longitude = data.longitude;
       if (data.altitude !== undefined) drone.position.altitude = data.altitude;
       if (data.speed !== undefined) drone.speed = data.speed;
-      if (data.batteryLevel !== undefined) drone.batteryPercentage = data.batteryLevel;
+      if (data.batteryLevel !== undefined) {
+        drone.batteryPercentage = data.batteryLevel;
+        // 🔍 添加电量更新日志
+        console.log(`🔋 无人机 ${droneId} 电量更新: ${oldBattery}% → ${drone.batteryPercentage}%`);
+      }
       drone.lastHeartbeat = lastHeartbeat;
       if (data.flightMode) drone.flightMode = data.flightMode;
 
@@ -673,6 +840,424 @@ const sendCommand = () => {
   commandMessage.value = '';
 };
 
+// ===== 遥控器API调用函数 =====
+
+const checkAvailability = async () => {
+  if (!selectedDrone.value) return;
+  
+  availabilityLoading.value = true;
+  try {
+    availability.value = await checkDroneAvailability(selectedDrone.value.droneId);
+    updateResponse('可用性检查', availability.value);
+  } catch (error) {
+    // notification.error({ message: '检查无人机可用性失败' });
+    console.error('❌ 检查无人机可用性失败:', error);
+    updateResponse('可用性检查失败', error);
+  } finally {
+    availabilityLoading.value = false;
+  }
+};
+
+const sendQuickCommand = async (action: string) => {
+  if (!selectedDrone.value) {
+    // notification.warning({ message: '请先选择无人机' });
+    console.warn('⚠️ 请先选择无人机');
+    return;
+  }
+
+  commandLoading.value = true;
+  console.log(`🚀 开始发送${action}命令到无人机 ${selectedDrone.value.droneId}`);
+  
+  try {
+    let response: DroneCommandResponse;
+    
+    switch (action) {
+      case 'RETURN_TO_HOME':
+        console.log('📡 调用returnToHome API');
+        response = await returnToHome(selectedDrone.value.droneId);
+        break;
+      case 'LAND':
+        console.log('📡 调用landDrone API');
+        response = await landDrone(selectedDrone.value.droneId);
+        break;
+      case 'HOVER':
+        console.log('📡 调用hoverDrone API');
+        response = await hoverDrone(selectedDrone.value.droneId);
+        break;
+      case 'EMERGENCY_STOP':
+        console.log('📡 调用emergencyStopDrone API');
+        response = await emergencyStopDrone(selectedDrone.value.droneId);
+        break;
+      case 'ARM':
+      case 'DISARM':
+        console.log(`📡 使用通用命令API发送${action}命令`);
+        const command = createDroneCommand(action as any);
+        console.log(`📋 创建的命令对象:`, command);
+        response = await sendDroneControlCommand(selectedDrone.value.droneId, command);
+        console.log(`📨 ${action}命令API响应:`, response);
+        break;
+      default:
+        console.log(`📡 使用通用命令API发送${action}命令`);
+        const defaultCommand = createDroneCommand(action as any);
+        response = await sendDroneControlCommand(selectedDrone.value.droneId, defaultCommand);
+    }
+    
+    console.log(`📊 ${action}命令最终响应:`, response);
+    console.log(`🔍 响应详细信息: success=${response?.success} (type: ${typeof response?.success}), message="${response?.message}"`);
+    
+    // 检查响应的success字段 - 使用更宽松的判断条件
+    const isSuccess = response && (
+      response.success === true || 
+      String(response.success) === 'true' || 
+      (response.message && response.message.includes('成功'))
+    );
+    
+    if (isSuccess) {
+      console.log(`✅ ${action}命令发送成功`);
+      // 移除notification.success调用
+      updateResponse(`快速命令: ${action}`, response);
+      
+      // 延迟加载命令历史，避免并发请求冲突
+      setTimeout(() => {
+        loadCommandHistory().catch(err => {
+          console.error('⚠️ 加载命令历史失败，但不影响主要功能:', err);
+        });
+      }, 500);
+    } else {
+      console.error(`❌ ${action}命令响应失败，success=${response?.success}, message=${response?.message}`);
+      // 移除notification.error调用
+      updateResponse(`命令失败: ${action}`, response);
+    }
+  } catch (error) {
+    console.error(`💥 发送${action}命令时发生异常:`, error);
+    // 移除notification.error调用
+    updateResponse(`发送命令失败: ${action}`, error);
+  } finally {
+    commandLoading.value = false;
+    console.log(`🏁 ${action}命令处理完成`);
+  }
+};
+
+const showTakeoffDialog = () => {
+  takeoffDialogVisible.value = true;
+};
+
+const confirmTakeoff = async () => {
+  if (!selectedDrone.value || !takeoffAltitude.value) return;
+  
+  takeoffDialogVisible.value = false;
+  commandLoading.value = true;
+  
+  try {
+    const command = createTakeoffCommand(takeoffAltitude.value);
+    const response = await sendDroneControlCommand(selectedDrone.value.droneId, command);
+    
+    if (response.success) {
+      // notification.success({ message: `起飞命令发送成功 (高度: ${takeoffAltitude.value}m)` });
+      console.log(`✅ 起飞命令发送成功 (高度: ${takeoffAltitude.value}m)`);
+      updateResponse('起飞命令', response);
+      loadCommandHistory();
+    } else {
+      // notification.error({ message: `起飞命令发送失败: ${response.message}` });
+      console.error(`❌ 起飞命令发送失败: ${response.message}`);
+      updateResponse('起飞命令失败', response);
+    }
+  } catch (error) {
+    // notification.error({ message: '发送起飞命令失败' });
+    console.error('💥 发送起飞命令失败:', error);
+    updateResponse('发送起飞命令失败', error);
+  } finally {
+    commandLoading.value = false;
+  }
+};
+
+const sendGotoCommand = async () => {
+  if (!selectedDrone.value || !isGotoValid.value) return;
+  
+  commandLoading.value = true;
+  try {
+    const command = createMoveToCommand(
+      gotoParams.latitude!,
+      gotoParams.longitude!,
+      gotoParams.altitude,
+      gotoParams.speed
+    );
+    
+    const response = await sendDroneControlCommand(selectedDrone.value.droneId, command);
+    
+    if (response.success) {
+      // notification.success({ message: 'GOTO 命令发送成功' });
+      console.log('✅ GOTO 命令发送成功');
+      updateResponse('GOTO 命令', response);
+      loadCommandHistory();
+    } else {
+      // notification.error({ message: `GOTO 命令发送失败: ${response.message}` });
+      console.error(`❌ GOTO 命令发送失败: ${response.message}`);
+      updateResponse('GOTO 命令失败', response);
+    }
+  } catch (error) {
+    // notification.error({ message: '发送 GOTO 命令失败' });
+    console.error('💥 发送 GOTO 命令失败:', error);
+    updateResponse('发送 GOTO 命令失败', error);
+  } finally {
+    commandLoading.value = false;
+  }
+};
+
+const setAltitude = async () => {
+  if (!selectedDrone.value || !altitudeValue.value) return;
+  
+  commandLoading.value = true;
+  try {
+    const command = createSetAltitudeCommand(altitudeValue.value);
+    const response = await sendDroneControlCommand(selectedDrone.value.droneId, command);
+    
+    if (response.success) {
+      // notification.success({ message: `设置高度成功: ${altitudeValue.value}m` });
+      console.log(`✅ 设置高度成功: ${altitudeValue.value}m`);
+      updateResponse('设置高度', response);
+      loadCommandHistory();
+    } else {
+      // notification.error({ message: `设置高度失败: ${response.message}` });
+      console.error(`❌ 设置高度失败: ${response.message}`);
+      updateResponse('设置高度失败', response);
+    }
+  } catch (error) {
+    // notification.error({ message: '设置高度失败' });
+    console.error('💥 设置高度失败:', error);
+    updateResponse('设置高度失败', error);
+  } finally {
+    commandLoading.value = false;
+  }
+};
+
+const setSpeed = async () => {
+  if (!selectedDrone.value || !speedValue.value) return;
+  
+  commandLoading.value = true;
+  try {
+    const command = createSetSpeedCommand(speedValue.value);
+    const response = await sendDroneControlCommand(selectedDrone.value.droneId, command);
+    
+    if (response.success) {
+      // notification.success({ message: `设置速度成功: ${speedValue.value}m/s` });
+      console.log(`✅ 设置速度成功: ${speedValue.value}m/s`);
+      updateResponse('设置速度', response);
+      loadCommandHistory();
+    } else {
+      // notification.error({ message: `设置速度失败: ${response.message}` });
+      console.error(`❌ 设置速度失败: ${response.message}`);
+      updateResponse('设置速度失败', response);
+    }
+  } catch (error) {
+    // notification.error({ message: '设置速度失败' });
+    console.error('💥 设置速度失败:', error);
+    updateResponse('设置速度失败', error);
+  } finally {
+    commandLoading.value = false;
+  }
+};
+
+const startPatrol = async () => {
+  if (!selectedDrone.value) return;
+  
+  commandLoading.value = true;
+  try {
+    const command = createPatrolCommand(
+      patrolParams.trajectoryType as any,
+      patrolParams.size,
+      patrolParams.altitude,
+      patrolParams.speed
+    );
+    
+    const response = await sendDroneControlCommand(selectedDrone.value.droneId, command);
+    
+    if (response.success) {
+      // notification.success({ message: `开始${patrolParams.trajectoryType}轨迹巡航` });
+      console.log(`✅ 开始${patrolParams.trajectoryType}轨迹巡航`);
+      updateResponse('开始轨迹巡航', response);
+      loadCommandHistory();
+    } else {
+      // notification.error({ message: `开始巡航失败: ${response.message}` });
+      console.error(`❌ 开始巡航失败: ${response.message}`);
+      updateResponse('开始巡航失败', response);
+    }
+  } catch (error) {
+    // notification.error({ message: '开始巡航失败' });
+    console.error('💥 开始巡航失败:', error);
+    updateResponse('开始巡航失败', error);
+  } finally {
+    commandLoading.value = false;
+  }
+};
+
+const stopPatrol = async () => {
+  if (!selectedDrone.value) return;
+  
+  commandLoading.value = true;
+  try {
+    const command = createDroneCommand('STOP_PATROL');
+    const response = await sendDroneControlCommand(selectedDrone.value.droneId, command);
+    
+    if (response.success) {
+      // notification.success({ message: '停止巡航成功' });
+      console.log('✅ 停止巡航成功');
+      updateResponse('停止巡航', response);
+      loadCommandHistory();
+    } else {
+      // notification.error({ message: `停止巡航失败: ${response.message}` });
+      console.error(`❌ 停止巡航失败: ${response.message}`);
+      updateResponse('停止巡航失败', response);
+    }
+  } catch (error) {
+    // notification.error({ message: '停止巡航失败' });
+    console.error('💥 停止巡航失败:', error);
+    updateResponse('停止巡航失败', error);
+  } finally {
+    commandLoading.value = false;
+  }
+};
+
+const sendRawCommand = async () => {
+  if (!selectedDrone.value || !rawCommand.value.trim()) return;
+  
+  commandLoading.value = true;
+  try {
+    const commandObj = JSON.parse(rawCommand.value);
+    const response = await apiSendRawCommand(selectedDrone.value.droneId, commandObj);
+    
+    if (response.success) {
+      // notification.success({ message: '原始命令发送成功' });
+      console.log('✅ 原始命令发送成功');
+      updateResponse('原始命令', response);
+      loadCommandHistory();
+    } else {
+      // notification.error({ message: `原始命令发送失败: ${response.message}` });
+      console.error(`❌ 原始命令发送失败: ${response.message}`);
+      updateResponse('原始命令失败', response);
+    }
+  } catch (error) {
+    if (error instanceof SyntaxError) {
+      // notification.error({ message: 'JSON 格式错误' });
+      console.error('❌ JSON 格式错误:', error);
+    } else {
+      // notification.error({ message: '发送原始命令失败' });
+      console.error('💥 发送原始命令失败:', error);
+    }
+    updateResponse('发送原始命令失败', error);
+  } finally {
+    commandLoading.value = false;
+  }
+};
+
+const formatCommand = () => {
+  try {
+    const obj = JSON.parse(rawCommand.value);
+    rawCommand.value = JSON.stringify(obj, null, 2);
+    // notification.success({ message: '格式化成功' });
+    console.log('✅ 格式化成功');
+  } catch (error) {
+    // notification.error({ message: 'JSON 格式错误' });
+    console.error('❌ JSON 格式错误:', error);
+  }
+};
+
+const loadCommandTemplate = () => {
+  rawCommand.value = JSON.stringify({
+    action: "GOTO",
+    parameters: {
+      latitude: 41.878113,
+      longitude: 123.430201,
+      altitude: 25,
+      speed: 5
+    },
+    priority: 6,
+    timeoutSeconds: 60
+  }, null, 2);
+};
+
+const loadCommandHistory = async () => {
+  if (!selectedDrone.value) return;
+  
+  historyLoading.value = true;
+  try {
+    console.log('开始加载命令历史');
+    commandHistory.value = await getDroneCommandHistory(selectedDrone.value.droneId, 10);
+    console.log(`成功加载 ${commandHistory.value.length} 条命令历史`);
+    updateResponse('命令历史加载', `获取到 ${commandHistory.value.length} 条记录`);
+  } catch (error) {
+    console.error('加载命令历史失败:', error);
+    // 不显示错误通知，因为这不是关键功能
+    // notification.error({ message: '加载命令历史失败' });
+    updateResponse('命令历史加载失败', error);
+  } finally {
+    historyLoading.value = false;
+  }
+};
+
+const clearHistory = () => {
+  commandHistory.value = [];
+  updateResponse('命令历史', '显示已清空');
+};
+
+const cancelCommand = async (commandId: string) => {
+  if (!selectedDrone.value) return;
+  
+  try {
+    const result = await cancelDroneCommand(selectedDrone.value.droneId, commandId);
+    if (result.success) {
+      // notification.success({ message: '命令取消成功' });
+      console.log('✅ 命令取消成功');
+      loadCommandHistory();
+    } else {
+      // notification.error({ message: '命令取消失败' });
+      console.error('❌ 命令取消失败');
+    }
+    updateResponse('取消命令', result);
+  } catch (error) {
+    // notification.error({ message: '取消命令失败' });
+    console.error('💥 取消命令失败:', error);
+    updateResponse('取消命令失败', error);
+  }
+};
+
+const confirmEmergencyStop = () => {
+  Modal.confirm({
+    title: '确认紧急停止',
+    content: '确定要对当前无人机执行紧急停止吗？此操作不可撤销！',
+    okType: 'danger',
+    onOk: () => sendQuickCommand('EMERGENCY_STOP')
+  });
+};
+
+const confirmEmergencyStopAll = () => {
+  Modal.confirm({
+    title: '确认紧急停止所有无人机',
+    content: '确定要对所有无人机执行紧急停止吗？此操作将影响系统中的所有无人机，不可撤销！',
+    okType: 'danger',
+    onOk: async () => {
+      emergencyLoading.value = true;
+      try {
+        const response = await emergencyStopAll();
+        if (response.success) {
+          // notification.success({ message: `紧急停止成功，影响 ${response.affectedDrones.length} 架无人机` });
+          console.log(`✅ 紧急停止成功，影响 ${response.affectedDrones.length} 架无人机`);
+        } else {
+          // notification.error({ message: '紧急停止失败' });
+          console.error('❌ 紧急停止失败');
+        }
+        updateResponse('紧急停止所有无人机', response);
+      } catch (error) {
+        // notification.error({ message: '紧急停止所有无人机失败' });
+        console.error('💥 紧急停止所有无人机失败:', error);
+        updateResponse('紧急停止所有无人机失败', error);
+      } finally {
+        emergencyLoading.value = false;
+      }
+    }
+  });
+};
+
 // 绘制地理围栏
 const toggleGeofence = () => {
   if (!map.value || !selectedDrone.value) return;
@@ -880,41 +1465,37 @@ onUnmounted(() => {
 });
 
 // 生命周期钩子
-onMounted(() => {
-  console.log('组件已挂载，初始化中...');
-
-  // 重置组件标志
-  isComponentMounted.value = true;
-  mapScriptLoaded.value = false;
-
-  // 初始化地图
-  initBaiduMap();
-
-  // 尝试检测后端API是否可用
-  checkBackendAvailability().then(available => {
-    // 确保组件仍然挂载
-    if (!isComponentMounted.value) return;
-
-    if (available) {
-      // 后端可用，尝试连接WebSocket
-      initWebSocket();
-    } else {
-      console.log('后端API不可用，请检查后端服务');
-      notification.error({
-        message: '后端连接失败',
-        description: '无法连接到后端服务，请确保后端服务和Python无人机模拟器正在运行'
-      });
-    }
-  });
-
-  // 设置定时器，每15秒检查一次过期数据
-  staleCheckInterval = setInterval(() => {
-    if (isComponentMounted.value) {
-      checkStaleData();
-    }
-  }, 15000) as unknown as number;
-
-  console.log('组件初始化完成');
+onMounted(async () => {
+  console.log('无人机状态监控组件已挂载');
+  
+  try {
+    // 连接WebSocket
+    initWebSocket();
+    
+    // 加载所有地理围栏数据，用于后续的无人机关联显示
+    await loadAllGeofences();
+    
+    // 初始化地图（使用延迟，确保DOM已渲染）
+    setTimeout(() => {
+      initBaiduMap();
+    }, 1000);
+    
+    // 5秒后检查数据状态
+    setTimeout(() => {
+      if (Object.keys(realDrones.value).length === 0) {
+        notification.info({
+          message: '等待无人机数据',
+          description: '目前没有收到任何无人机数据。请确保：\n1. Python无人机模拟器正在运行\n2. 模拟器已被管理员批准注册\n3. WebSocket连接正常',
+          duration: 8
+        });
+      }
+    }, 5000);
+    
+    // 启动定期检查过期数据的定时器
+    staleCheckInterval = setInterval(checkStaleData, 60000) as unknown as number; // 每60秒检查一次
+  } catch (error) {
+    console.error('组件初始化时出错:', error);
+  }
 });
 
 // 初始化百度地图函数
@@ -1333,6 +1914,31 @@ const focusAllDrones = () => {
 // 地理围栏相关功能
 // ============================================================================
 
+// 地理围栏样式配置
+const geofenceStyles = {
+  NO_FLY_ZONE: {
+    strokeColor: '#ff4d4f',
+    strokeWeight: 2,
+    strokeOpacity: 0.8,
+    fillColor: '#ff4d4f',
+    fillOpacity: 0.2
+  },
+  FLY_ZONE: {
+    strokeColor: '#52c41a',
+    strokeWeight: 2,
+    strokeOpacity: 0.8,
+    fillColor: '#52c41a',
+    fillOpacity: 0.1
+  },
+  RESTRICTED_ZONE: {
+    strokeColor: '#faad14',
+    strokeWeight: 2,
+    strokeOpacity: 0.8,
+    fillColor: '#faad14',
+    fillOpacity: 0.2
+  }
+};
+
 // 地理围栏相关状态
 const droneGeofences = ref<GeofenceListItem[]>([]);
 const availableGeofences = ref<GeofenceListItem[]>([]);
@@ -1580,7 +2186,7 @@ const getGeofenceTypeText = (type: string): string => {
   const textMap: Record<string, string> = {
     'NO_FLY_ZONE': '禁飞区',
     'FLY_ZONE': '允飞区',
-    'RESTRICTED_ZONE': '限飞区',
+    'RESTRICTED_ZONE': '限制区',
   };
   return textMap[type] || type;
 };
@@ -1603,14 +2209,27 @@ const isGeofenceAssigned = (geofenceId: string): boolean => {
 
 // 监听选中无人机变化，自动加载地理围栏数据
 watch(selectedDrone, async (newDrone) => {
-  if (newDrone?.droneId) {
-    // 清除之前的选择
-    clearGeofenceSelection();
-    // 加载数据
+  if (newDrone) {
     await Promise.all([
       loadDroneGeofences(),
       loadAvailableGeofences()
     ]);
+    
+    // 当选中新的无人机时，自动更新地理围栏显示
+    if (showDroneGeofences.value) {
+      updateDroneGeofenceDisplay();
+    }
+  }
+});
+
+// 监听地理围栏显示开关变化
+watch(showDroneGeofences, (enabled) => {
+  if (enabled && selectedDrone.value) {
+    // 开启时显示地理围栏
+    updateDroneGeofenceDisplay();
+  } else {
+    // 关闭时清除地理围栏显示
+    clearGeofenceOverlays();
   }
 });
 
@@ -1636,6 +2255,154 @@ declare global {
     BMap_loadScriptTime: number;
   }
 }
+
+const geofenceTypeNames = {
+  'NO_FLY_ZONE': '禁飞区',
+  'FLY_ZONE': '允飞区',
+  'RESTRICTED_ZONE': '限制区',
+};
+
+// 清除地图上的地理围栏显示
+const clearGeofenceOverlays = () => {
+  if (!map.value) return;
+  
+  geofenceOverlays.value.forEach(overlay => {
+    map.value.removeOverlay(overlay);
+  });
+  geofenceOverlays.value = [];
+};
+
+// 在地图上渲染地理围栏
+const renderGeofencesOnMap = (geofences: GeofenceData[]) => {
+  if (!map.value || !window.BMap) return;
+  
+  const BMap = window.BMap;
+  
+  // 清除现有地理围栏
+  clearGeofenceOverlays();
+  
+  console.log(`准备在地图上渲染${geofences.length}个地理围栏`);
+  
+  geofences.forEach(geofence => {
+    try {
+      // 将坐标转换为百度地图点
+      const points = geofence.coordinates.map(coord => 
+        new BMap.Point(coord.lng, coord.lat)
+      );
+      
+      if (points.length < 3) {
+        console.warn(`地理围栏 ${geofence.name} 坐标点少于3个，跳过渲染`);
+        return;
+      }
+      
+      // 获取样式配置
+      const style = geofenceStyles[geofence.type] || geofenceStyles.RESTRICTED_ZONE;
+      
+      // 创建多边形
+      const polygon = new BMap.Polygon(points, style);
+      
+      // 添加信息窗口
+      const infoWindow = new BMap.InfoWindow(`
+        <div style="width: 200px; padding: 8px; font-family: Arial, sans-serif;">
+          <div style="font-weight: bold; color: ${style.strokeColor}; margin-bottom: 8px; border-bottom: 1px solid #eee; padding-bottom: 4px;">
+            ${geofence.name}
+          </div>
+          <div style="font-size: 12px; line-height: 1.6; color: #333;">
+            <div><strong>类型:</strong> ${getGeofenceTypeText(geofence.type)}</div>
+            <div><strong>状态:</strong> ${geofence.active ? '活跃' : '非活跃'}</div>
+            ${geofence.description ? `<div><strong>描述:</strong> ${geofence.description}</div>` : ''}
+            <div style="margin-top: 8px; font-size: 11px; color: #666;">
+              点击查看详细信息
+            </div>
+          </div>
+        </div>
+      `, {
+        enableCloseOnClick: true,
+        width: 0,
+        height: 0
+      });
+      
+      // 添加点击事件
+      polygon.addEventListener('click', () => {
+        polygon.openInfoWindow(infoWindow);
+      });
+      
+      // 添加到地图
+      map.value.addOverlay(polygon);
+      geofenceOverlays.value.push(polygon);
+      
+      console.log(`已渲染地理围栏: ${geofence.name} (${geofence.type})`);
+    } catch (error) {
+      console.error(`渲染地理围栏 ${geofence.name} 时出错:`, error);
+    }
+  });
+  
+  console.log(`成功渲染了${geofenceOverlays.value.length}个地理围栏`);
+};
+
+// 更新选中无人机的地理围栏显示
+const updateDroneGeofenceDisplay = async () => {
+  if (!selectedDrone.value || !showDroneGeofences.value) {
+    clearGeofenceOverlays();
+    return;
+  }
+  
+  try {
+    console.log(`加载无人机 ${selectedDrone.value.serialNumber} 的关联地理围栏`);
+    
+    // 获取无人机关联的地理围栏
+    const droneGeofenceList = await getDroneGeofences(selectedDrone.value.droneId);
+    
+    // 从所有地理围栏中筛选出该无人机关联的限制区
+    const associatedRestrictedZones = allGeofences.value.filter(geofence => 
+      geofence.type === 'RESTRICTED_ZONE' && 
+      droneGeofenceList.some(item => item.geofenceId === geofence.id)
+    );
+    
+    // 获取所有对全体无人机生效的禁飞区和允许飞行区
+    const globalZones = allGeofences.value.filter(geofence => 
+      geofence.type === 'NO_FLY_ZONE' || geofence.type === 'FLY_ZONE'
+    );
+    
+    // 合并所有需要显示的地理围栏
+    const allZonesToDisplay = [...associatedRestrictedZones, ...globalZones];
+    
+    if (allZonesToDisplay.length > 0) {
+      console.log(`找到${associatedRestrictedZones.length}个关联的限制区和${globalZones.length}个全局区域，开始渲染`);
+      renderGeofencesOnMap(allZonesToDisplay);
+      
+      const restrictedCount = associatedRestrictedZones.length;
+      const noFlyCount = globalZones.filter(z => z.type === 'NO_FLY_ZONE').length;
+      const flyCount = globalZones.filter(z => z.type === 'FLY_ZONE').length;
+      
+      notification.info({
+        message: '地理围栏已显示',
+        description: `已显示无人机 ${selectedDrone.value.serialNumber} 的飞行区域：
+          • ${restrictedCount} 个关联限制区
+          • ${noFlyCount} 个禁飞区
+          • ${flyCount} 个允许飞行区`,
+        duration: 4
+      });
+    } else {
+      console.log('该无人机没有关联的限制区，且当前没有全局区域');
+      clearGeofenceOverlays();
+      
+      notification.info({
+        message: '无地理围栏',
+        description: `无人机 ${selectedDrone.value.serialNumber} 没有关联的限制区，且当前没有全局禁飞区或允许飞行区`,
+        duration: 3
+      });
+    }
+    
+  } catch (error) {
+    console.error('加载无人机地理围栏显示失败:', error);
+    clearGeofenceOverlays();
+  }
+};
+
+const onGeofenceDisplayToggle = () => {
+  updateDroneGeofenceDisplay();
+};
 </script>
 
 <template>
@@ -1716,8 +2483,29 @@ declare global {
             <span>轨迹异常警告</span>
           </div>
           <div class="flex items-center">
+            <div class="w-4 h-4 rounded-full mr-2" style="background-color: #ff4d4f;"></div>
+            <span>禁飞区违规</span>
+          </div>
+          <div class="flex items-center">
             <div class="w-4 h-4 rounded-full mr-2" style="background-color: #d9d9d9;"></div>
             <span>离线</span>
+          </div>
+        </div>
+        
+        <!-- 地理围栏显示控制 -->
+        <div class="mt-4 pt-3 border-t border-gray-200">
+          <h4 class="text-sm font-medium mb-2">地理围栏显示</h4>
+          <div class="flex items-center justify-between">
+            <span class="text-sm">显示飞行区域</span>
+            <Switch
+              v-model:checked="showDroneGeofences"
+              @change="onGeofenceDisplayToggle"
+              size="small"
+            />
+          </div>
+          <div class="text-xs text-gray-500 mt-1">
+            显示选中无人机的关联限制区<br/>
+            以及所有禁飞区和允许飞行区
           </div>
         </div>
       </div>
@@ -1807,36 +2595,381 @@ declare global {
 
           <!-- 控制指令标签 -->
           <Tabs.TabPane key="2" tab="控制指令">
-            <div class="space-y-4">
-              <div>
-                <p class="mb-2 font-medium">发送控制指令:</p>
-                <Input.TextArea
-                  v-model:value="commandMessage"
-                  placeholder="输入控制指令"
-                  :rows="4"
-                  class="mb-2"
-                />
-                <Button type="primary" @click="sendCommand">
-                  <template #icon><SendOutlined /></template>
-                  发送指令
-                </Button>
-              </div>
+            <div class="space-y-6">
+              <!-- 系统状态 -->
+              <Card title="系统状态" size="small" class="bg-gray-50">
+                <div class="grid grid-cols-2 gap-4">
+                  <div class="flex items-center justify-between">
+                    <span>后端连接</span>
+                    <Tag :color="connected ? 'green' : 'red'">
+                      {{ connected ? '已连接' : '未连接' }}
+                    </Tag>
+                  </div>
+                  <div class="flex items-center justify-between">
+                    <span>无人机可用性</span>
+                    <div class="flex items-center space-x-2">
+                      <Tag v-if="availability" :color="availability.available ? 'green' : 'red'">
+                        {{ availability.available ? '可用' : '不可用' }}
+                      </Tag>
+                      <Button size="small" @click="checkAvailability" :loading="availabilityLoading">
+                        检查
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+              </Card>
 
-              <div class="mt-4">
-                <p class="mb-2 font-medium">预设指令:</p>
-                <Space>
-                  <Button @click="commandMessage = JSON.stringify({ action: 'GOTO_HOME', parameters: {} })">
+              <!-- 无人机信息卡片 -->
+              <Card title="无人机信息" size="small">
+                <div class="grid grid-cols-2 gap-4 text-sm">
+                  <div><strong>序列号:</strong> {{ selectedDrone?.serialNumber }}</div>
+                  <div><strong>型号:</strong> {{ selectedDrone?.model }}</div>
+                  <div><strong>状态:</strong> 
+                    <Tag :color="getDroneStatusColor(selectedDrone?.status || '')">
+                      {{ selectedDrone?.status }}
+                    </Tag>
+                  </div>
+                  <div><strong>电量:</strong> {{ selectedDrone?.batteryPercentage }}%</div>
+                  <div><strong>位置:</strong> {{ formatPosition(selectedDrone?.position) }}</div>
+                  <div><strong>最后心跳:</strong> {{ selectedDrone?.lastHeartbeat ? formatTime(selectedDrone.lastHeartbeat) : '无' }}</div>
+                </div>
+              </Card>
+
+              <!-- 快速命令 -->
+              <Card title="快速命令" size="small">
+                <div class="grid grid-cols-2 gap-3">
+                  <Button 
+                    type="primary" 
+                    @click="sendQuickCommand('ARM')"
+                    :disabled="!canSendCommand"
+                    :loading="commandLoading"
+                    class="h-10"
+                  >
+                    解锁 (ARM)
+                  </Button>
+                  <Button 
+                    @click="sendQuickCommand('DISARM')"
+                    :disabled="!canSendCommand"
+                    :loading="commandLoading"
+                    class="h-10"
+                  >
+                    锁定 (DISARM)
+                  </Button>
+                  <Button 
+                    type="primary"
+                    @click="showTakeoffDialog"
+                    :disabled="!canSendCommand"
+                    class="h-10"
+                  >
+                    起飞
+                  </Button>
+                  <Button 
+                    @click="sendQuickCommand('RETURN_TO_HOME')"
+                    :disabled="!canSendCommand"
+                    :loading="commandLoading"
+                    class="h-10"
+                  >
                     返航
                   </Button>
-                  <Button @click="commandMessage = JSON.stringify({ action: 'LAND', parameters: {} })">
+                  <Button 
+                    @click="sendQuickCommand('LAND')"
+                    :disabled="!canSendCommand"
+                    :loading="commandLoading"
+                    class="h-10"
+                  >
                     降落
                   </Button>
-                  <Button @click="commandMessage = JSON.stringify({ action: 'HOVER', parameters: { duration: 30 } })">
+                  <Button 
+                    @click="sendQuickCommand('HOVER')"
+                    :disabled="!canSendCommand"
+                    :loading="commandLoading"
+                    class="h-10"
+                  >
                     悬停
                   </Button>
-                </Space>
+                </div>
+                
+                <!-- 紧急操作 -->
+                <div class="mt-4 pt-4 border-t border-gray-200">
+                  <div class="grid grid-cols-2 gap-3">
+                    <Button 
+                      danger
+                      @click="confirmEmergencyStop"
+                      :disabled="!selectedDrone"
+                      :loading="commandLoading"
+                      class="h-10"
+                    >
+                      <template #icon><WarningOutlined /></template>
+                      紧急停止
+                    </Button>
+                    <Button 
+                      danger
+                      @click="confirmEmergencyStopAll"
+                      :loading="emergencyLoading"
+                      class="h-10"
+                    >
+                      <template #icon><WarningOutlined /></template>
+                      全部紧急停止
+                    </Button>
+                  </div>
+                </div>
+              </Card>
+
+              <!-- 高级控制 -->
+              <Card title="高级控制" size="small">
+                <Tabs v-model:activeKey="controlActiveTab" size="small">
+                  <!-- 运动控制 -->
+                  <Tabs.TabPane key="movement" tab="运动控制">
+            <div class="space-y-4">
+                      <!-- GOTO命令 -->
+                      <div class="p-4 border rounded-lg bg-gray-50">
+                        <h4 class="font-medium mb-3">移动到指定位置 (GOTO)</h4>
+                        <div class="grid grid-cols-2 gap-3 mb-3">
+              <div>
+                            <label class="block text-sm font-medium mb-1">纬度</label>
+                            <Input 
+                              v-model:value="latitudeDisplay" 
+                              type="number" 
+                              placeholder="如: 41.878113"
+                              :step="0.000001"
+                            />
+                          </div>
+                          <div>
+                            <label class="block text-sm font-medium mb-1">经度</label>
+                            <Input 
+                              v-model:value="longitudeDisplay" 
+                              type="number" 
+                              placeholder="如: 123.430201"
+                              :step="0.000001"
+                            />
+                          </div>
+                          <div>
+                            <label class="block text-sm font-medium mb-1">高度 (米)</label>
+                            <Input v-model:value="gotoParams.altitude" type="number" :min="1" :max="500" />
+                          </div>
+                          <div>
+                            <label class="block text-sm font-medium mb-1">速度 (m/s)</label>
+                            <Input v-model:value="gotoParams.speed" type="number" :min="1" :max="20" />
+                          </div>
+                        </div>
+                        <Button 
+                          type="primary" 
+                          @click="sendGotoCommand"
+                          :disabled="!canSendCommand || !isGotoValid"
+                          :loading="commandLoading"
+                          class="w-full"
+                        >
+                          执行 GOTO
+                        </Button>
+                      </div>
+
+                      <!-- 高度和速度设置 -->
+                      <div class="grid grid-cols-2 gap-4">
+                        <div class="p-4 border rounded-lg bg-gray-50">
+                          <h4 class="font-medium mb-3">设置高度</h4>
+                          <Input 
+                            v-model:value="altitudeDisplay" 
+                            type="number" 
+                            placeholder="高度 (米)"
+                            :min="1"
+                            :max="500"
+                            class="mb-3"
+                          />
+                          <Button 
+                            type="primary" 
+                            @click="setAltitude"
+                            :disabled="!canSendCommand || !altitudeDisplay"
+                            :loading="commandLoading"
+                            class="w-full"
+                          >
+                            设置高度
+                          </Button>
+                        </div>
+                        <div class="p-4 border rounded-lg bg-gray-50">
+                          <h4 class="font-medium mb-3">设置速度</h4>
+                          <Input 
+                            v-model:value="speedDisplay" 
+                            type="number" 
+                            placeholder="速度 (m/s)"
+                            :min="1"
+                            :max="20"
+                            class="mb-3"
+                          />
+                          <Button 
+                            type="primary" 
+                            @click="setSpeed"
+                            :disabled="!canSendCommand || !speedDisplay"
+                            :loading="commandLoading"
+                            class="w-full"
+                          >
+                            设置速度
+                          </Button>
+                        </div>
+                      </div>
+                    </div>
+                  </Tabs.TabPane>
+
+                  <!-- 轨迹巡航 -->
+                  <Tabs.TabPane key="patrol" tab="轨迹巡航">
+                    <div class="space-y-4">
+                      <div class="p-4 border rounded-lg bg-gray-50">
+                        <h4 class="font-medium mb-3">巡航参数</h4>
+                        <div class="grid grid-cols-2 gap-3 mb-3">
+                          <div>
+                            <label class="block text-sm font-medium mb-1">轨迹类型</label>
+                            <Select v-model:value="patrolParams.trajectoryType" class="w-full">
+                              <Select.Option value="RECTANGLE">矩形</Select.Option>
+                              <Select.Option value="CIRCLE">圆形</Select.Option>
+                              <Select.Option value="TRIANGLE">三角形</Select.Option>
+                              <Select.Option value="LINE">直线</Select.Option>
+                            </Select>
+                          </div>
+                          <div>
+                            <label class="block text-sm font-medium mb-1">大小 (米)</label>
+                            <Input v-model:value="patrolParams.size" type="number" :min="10" :max="1000" />
+                          </div>
+                          <div>
+                            <label class="block text-sm font-medium mb-1">高度 (米)</label>
+                            <Input v-model:value="patrolParams.altitude" type="number" :min="1" :max="500" />
+                          </div>
+                          <div>
+                            <label class="block text-sm font-medium mb-1">速度 (m/s)</label>
+                            <Input v-model:value="patrolParams.speed" type="number" :min="1" :max="20" />
+                          </div>
+                        </div>
+                        <div class="flex space-x-3">
+                          <Button 
+                            type="primary" 
+                            @click="startPatrol"
+                            :disabled="!canSendCommand"
+                            :loading="commandLoading"
+                            class="flex-1"
+                          >
+                            开始巡航
+                          </Button>
+                          <Button 
+                            @click="stopPatrol"
+                            :disabled="!canSendCommand"
+                            :loading="commandLoading"
+                            class="flex-1"
+                          >
+                            停止巡航
+                          </Button>
+                        </div>
+                      </div>
+                    </div>
+                  </Tabs.TabPane>
+
+                  <!-- 原始命令 -->
+                  <Tabs.TabPane key="raw" tab="原始命令">
+                    <div class="space-y-4">
+                      <div class="flex justify-between items-center">
+                        <h4 class="font-medium">JSON 命令编辑器</h4>
+                        <div class="space-x-2">
+                          <Button size="small" @click="loadCommandTemplate">加载模板</Button>
+                          <Button size="small" @click="formatCommand">格式化</Button>
+                        </div>
+                      </div>
+                <Input.TextArea
+                        v-model:value="rawCommand"
+                        :rows="10"
+                        placeholder="输入 JSON 格式的命令"
+                        class="font-mono"
+                />
+                      <Button 
+                        type="primary" 
+                        @click="sendRawCommand"
+                        :disabled="!canSendCommand || !rawCommand.trim()"
+                        :loading="commandLoading"
+                        class="w-full"
+                      >
+                        发送原始命令
+                </Button>
+              </div>
+                  </Tabs.TabPane>
+                </Tabs>
+              </Card>
+
+              <!-- 命令历史 -->
+              <Card title="命令历史" size="small">
+                <div class="flex justify-between items-center mb-3">
+                  <span class="text-sm text-gray-600">最近 10 条命令</span>
+                  <div class="space-x-2">
+                    <Button size="small" @click="loadCommandHistory" :loading="historyLoading">
+                      刷新
+                  </Button>
+                    <Button size="small" @click="clearHistory">
+                      清空显示
+                  </Button>
+                  </div>
+                </div>
+                <div class="space-y-2 max-h-64 overflow-y-auto">
+                  <div 
+                    v-for="cmd in commandHistory" 
+                    :key="cmd.commandId"
+                    class="p-3 border rounded-lg bg-gray-50"
+                  >
+                    <div class="flex justify-between items-start">
+                      <div class="flex-1">
+                        <div class="flex items-center space-x-2">
+                          <Tag :color="getCommandStatusColor(cmd.status)">
+                            {{ formatCommandStatus(cmd.status) }}
+                          </Tag>
+                          <span class="font-medium">{{ cmd.action }}</span>
+                        </div>
+                        <div class="text-xs text-gray-500 mt-1">
+                          {{ formatTime(cmd.issuedAt) }}
+                        </div>
+                      </div>
+                      <Button 
+                        v-if="cmd.status === 'PENDING' || cmd.status === 'SENT'"
+                        size="small" 
+                        danger 
+                        @click="cancelCommand(cmd.commandId)"
+                      >
+                        取消
+                  </Button>
               </div>
             </div>
+                  <div v-if="commandHistory.length === 0" class="text-center py-4 text-gray-500">
+                    暂无命令历史
+                  </div>
+                </div>
+              </Card>
+
+              <!-- API 响应监控 -->
+              <Card title="API 响应监控" size="small">
+                <div class="bg-black text-green-400 p-3 rounded font-mono text-xs max-h-32 overflow-y-auto">
+                  <pre v-if="lastResponse">{{ lastResponse }}</pre>
+                  <div v-else class="text-gray-500">等待 API 响应...</div>
+                </div>
+              </Card>
+            </div>
+
+            <!-- 起飞高度对话框 -->
+            <Modal
+              v-model:open="takeoffDialogVisible"
+              title="设置起飞高度"
+              @ok="confirmTakeoff"
+              okText="起飞"
+              cancelText="取消"
+            >
+              <div class="space-y-4">
+                <div>
+                  <label class="block text-sm font-medium mb-2">起飞高度 (米)</label>
+                  <Input 
+                    v-model:value="takeoffAltitude" 
+                    type="number" 
+                    :min="1" 
+                    :max="100"
+                    placeholder="请输入起飞高度"
+                  />
+                </div>
+                <div class="text-xs text-gray-500">
+                  建议起飞高度：10-50米
+                </div>
+              </div>
+            </Modal>
           </Tabs.TabPane>
 
           <!-- 地理围栏标签 -->
@@ -1912,7 +3045,7 @@ declare global {
                     >
                       <Select.Option value="NO_FLY_ZONE">禁飞区</Select.Option>
                       <Select.Option value="FLY_ZONE">允飞区</Select.Option>
-                      <Select.Option value="RESTRICTED_ZONE">限飞区</Select.Option>
+                      <Select.Option value="RESTRICTED_ZONE">限制区</Select.Option>
                     </Select>
                     <Switch
                       v-model:checked="showActiveOnly"
@@ -2164,3 +3297,4 @@ declare global {
   z-index: 1001;
 }
 </style>
+

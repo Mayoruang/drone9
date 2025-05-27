@@ -179,8 +179,10 @@ public class DroneStatusDto {
                 .model(drone.getModel())
                 .status(drone.getCurrentStatus())
                 .approvedAt(drone.getApprovedAt())
+                .createdAt(drone.getCreatedAt())
+                .updatedAt(drone.getUpdatedAt())
                 .lastHeartbeat(drone.getLastHeartbeatAt())
-                .connected(drone.getCurrentStatus() != Drone.DroneStatus.OFFLINE)
+                .connected(drone.getCurrentStatus() != null && drone.getCurrentStatus() != Drone.DroneStatus.OFFLINE)
                 .offlineReason(drone.getOfflineReason())
                 .offlineAt(drone.getOfflineAt())
                 .offlineBy(drone.getOfflineBy())
@@ -192,13 +194,7 @@ public class DroneStatusDto {
                         .build())
                 .build();
         
-        // 向后兼容字段
-        dto.setBatteryLevel(dto.getBatteryPercentage());
-        if (dto.getPosition() != null) {
-            dto.setLatitude(dto.getPosition().getLatitude());
-            dto.setLongitude(dto.getPosition().getLongitude());
-            dto.setAltitude(dto.getPosition().getAltitude());
-        }
+        // 位置、电池、速度等信息将通过enrichDroneStatusWithTelemetry方法从遥测数据中获取
         
         return dto;
     }

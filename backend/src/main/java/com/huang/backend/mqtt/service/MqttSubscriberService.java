@@ -8,6 +8,9 @@ import com.huang.backend.mqtt.model.CommandResponse;
 import com.huang.backend.mqtt.model.DroneTelemetryData;
 import com.huang.backend.mqtt.model.FarewellMessage;
 import com.huang.backend.drone.dto.DroneTelemetryDto;
+import com.huang.backend.geofence.service.GeofenceService;
+import com.huang.backend.geofence.dto.GeofenceListItemDto;
+import com.huang.backend.geofence.entity.Geofence;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.eclipse.paho.client.mqttv3.*;
@@ -25,6 +28,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.UUID;
+import java.util.List;
 
 /**
  * MQTT Subscriber Service that listens for drone telemetry data
@@ -39,6 +43,7 @@ public class MqttSubscriberService implements MqttCallback {
     private final DroneRepository droneRepository;
     private final ObjectMapper objectMapper;
     private final DroneWebSocketHandler droneWebSocketHandler;
+    private final GeofenceService geofenceService;
 
     @Value("${mqtt.topics.telemetry:drones/+/telemetry}")
     private String telemetryTopic;
@@ -201,6 +206,9 @@ public class MqttSubscriberService implements MqttCallback {
         // Update drone's last heartbeat timestamp in PostgreSQL
         updateDroneHeartbeat(droneId);
         
+        // 检查禁飞区违规
+        checkGeofenceViolations(droneId, telemetryData);
+        
         // 将遥测数据推送到WebSocket
         sendTelemetryToWebSocket(droneId, telemetryData);
     }
@@ -299,14 +307,20 @@ public class MqttSubscriberService implements MqttCallback {
                     .status(telemetryData.getStatus())
                     .build();
                 
-                // 如果遥测中有status字段，更新无人机状态
+                // 如果遥测中有status字段，更新无人机状态（但不覆盖地理围栏违规状态）
                 if (telemetryData.getStatus() != null) {
                     try {
                         Drone.DroneStatus newStatus = Drone.DroneStatus.valueOf(telemetryData.getStatus());
-                        if (drone.getCurrentStatus() != newStatus) {
+                        // 只有当前状态不是地理围栏违规时，才允许根据遥测数据更新状态
+                        // 地理围栏违规状态具有更高的优先级，需要手动解除
+                        if (drone.getCurrentStatus() != Drone.DroneStatus.GEOFENCE_VIOLATION && 
+                            drone.getCurrentStatus() != newStatus) {
                             drone.setCurrentStatus(newStatus);
                             droneRepository.save(drone);
                             log.info("根据遥测数据更新无人机{}({})状态为: {}", drone.getSerialNumber(), droneId, newStatus);
+                        } else if (drone.getCurrentStatus() == Drone.DroneStatus.GEOFENCE_VIOLATION) {
+                            log.debug("无人机{}({})处于地理围栏违规状态，忽略遥测状态更新: {}", 
+                                drone.getSerialNumber(), droneId, telemetryData.getStatus());
                         }
                     } catch (IllegalArgumentException e) {
                         log.warn("无人机{}({})发送了无效的状态值: {}", drone.getSerialNumber(), droneId, telemetryData.getStatus());
@@ -386,6 +400,92 @@ public class MqttSubscriberService implements MqttCallback {
             log.error("处理告别消息失败：无效的UUID格式: {}", droneId, e);
         } catch (Exception e) {
             log.error("处理无人机告别消息失败: {}", e.getMessage(), e);
+        }
+    }
+
+    /**
+     * Check for geofence violations and update the drone status accordingly
+     * 
+     * @param droneId the UUID of the drone (extracted from MQTT topic)
+     * @param telemetryData the telemetry data
+     */
+    private void checkGeofenceViolations(String droneId, DroneTelemetryData telemetryData) {
+        try {
+            // 检查位置数据是否有效
+            if (telemetryData.getLatitude() == null || telemetryData.getLongitude() == null) {
+                return;
+            }
+            
+            // droneId is now UUID from topic, not serial number
+            UUID droneUuid = UUID.fromString(droneId);
+            Optional<Drone> droneOpt = droneRepository.findById(droneUuid);
+            if (droneOpt.isPresent()) {
+                Drone drone = droneOpt.get();
+                
+                // 检查当前位置是否在任何地理围栏内
+                List<GeofenceListItemDto> containingGeofences = geofenceService.findGeofencesContainingPoint(
+                    telemetryData.getLongitude(), telemetryData.getLatitude());
+                
+                boolean inNoFlyZone = false;
+                boolean inRestrictedZone = false;
+                String violationDetails = "";
+                
+                for (GeofenceListItemDto geofence : containingGeofences) {
+                    if ("NO_FLY_ZONE".equals(geofence.getGeofenceType())) {
+                        inNoFlyZone = true;
+                        violationDetails += "禁飞区: " + geofence.getName() + "; ";
+                        log.warn("无人机{}({})进入禁飞区: {}", drone.getSerialNumber(), droneId, geofence.getName());
+                    } else if ("RESTRICTED_ZONE".equals(geofence.getGeofenceType())) {
+                        // 检查无人机是否有权限进入此限制区
+                        boolean hasPermission = drone.getGeofences().stream()
+                            .anyMatch(assignedGeofence -> assignedGeofence.getGeofenceId().equals(geofence.getGeofenceId()));
+                        
+                        if (!hasPermission) {
+                            inRestrictedZone = true;
+                            violationDetails += "未授权限制区: " + geofence.getName() + "; ";
+                            log.warn("无人机{}({})进入未授权限制区: {}", drone.getSerialNumber(), droneId, geofence.getName());
+                        }
+                    }
+                }
+                
+                // 根据违规情况更新无人机状态
+                Drone.DroneStatus newStatus = null;
+                if (inNoFlyZone) {
+                    newStatus = Drone.DroneStatus.GEOFENCE_VIOLATION;
+                    log.error("无人机{}({})违反禁飞区规定！位置: ({}, {})", 
+                        drone.getSerialNumber(), droneId, telemetryData.getLatitude(), telemetryData.getLongitude());
+                } else if (inRestrictedZone) {
+                    newStatus = Drone.DroneStatus.GEOFENCE_VIOLATION;
+                    log.error("无人机{}({})进入未授权限制区！位置: ({}, {})", 
+                        drone.getSerialNumber(), droneId, telemetryData.getLatitude(), telemetryData.getLongitude());
+                } else if (drone.getCurrentStatus() == Drone.DroneStatus.GEOFENCE_VIOLATION) {
+                    // 无人机已离开违规区域，恢复到正常飞行状态
+                    newStatus = Drone.DroneStatus.FLYING;
+                    log.info("无人机{}({})已离开违规区域，状态恢复为正常飞行", drone.getSerialNumber(), droneId);
+                }
+                
+                // 更新状态（如果有变化）
+                if (newStatus != null && drone.getCurrentStatus() != newStatus) {
+                    drone.setCurrentStatus(newStatus);
+                    droneRepository.save(drone);
+                    
+                    // 记录状态变化详情
+                    if (newStatus == Drone.DroneStatus.GEOFENCE_VIOLATION) {
+                        log.info("无人机{}({})状态已更新为违规状态: {} - {}", 
+                            drone.getSerialNumber(), droneId, newStatus, violationDetails);
+                    } else {
+                        log.info("无人机{}({})状态已更新为: {}", 
+                            drone.getSerialNumber(), droneId, newStatus);
+                    }
+                }
+                
+            } else {
+                log.warn("检查禁飞区时未找到UUID为{}的无人机", droneId);
+            }
+        } catch (IllegalArgumentException e) {
+            log.error("检查禁飞区违规失败：无效的UUID格式: {}", droneId, e);
+        } catch (Exception e) {
+            log.error("检查禁飞区违规失败: {}", e.getMessage(), e);
         }
     }
 } 

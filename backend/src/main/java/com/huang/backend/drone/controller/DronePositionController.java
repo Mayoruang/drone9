@@ -47,7 +47,7 @@ public class DronePositionController {
         // Extract position data for each drone
         List<Map<String, Object>> positions = drones.stream()
             .map(drone -> {
-                DroneTelemetryDto telemetry = droneInfluxDBService.getLatestTelemetry(drone.getSerialNumber());
+                DroneTelemetryDto telemetry = droneInfluxDBService.getLatestTelemetry(drone.getDroneId().toString());
                 if (telemetry != null) {
                     Map<String, Object> position = new HashMap<>();
                     position.put("droneId", drone.getDroneId());
@@ -87,7 +87,7 @@ public class DronePositionController {
         
         return drones.stream()
             .map(drone -> {
-                DroneTelemetryDto telemetry = droneInfluxDBService.getLatestTelemetry(drone.getSerialNumber());
+                DroneTelemetryDto telemetry = droneInfluxDBService.getLatestTelemetry(drone.getDroneId().toString());
                 if (telemetry != null) {
                     Map<String, Object> position = new HashMap<>();
                     position.put("droneId", drone.getDroneId());

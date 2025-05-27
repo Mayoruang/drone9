@@ -37,7 +37,7 @@ public class DronePositionService {
         
         List<Map<String, Object>> positions = drones.stream()
             .map(drone -> {
-                DroneTelemetryDto telemetry = droneInfluxDBService.getLatestTelemetry(drone.getSerialNumber());
+                DroneTelemetryDto telemetry = droneInfluxDBService.getLatestTelemetry(drone.getDroneId().toString());
                 if (telemetry != null) {
                     Map<String, Object> position = new HashMap<>();
                     position.put("droneId", drone.getDroneId());
