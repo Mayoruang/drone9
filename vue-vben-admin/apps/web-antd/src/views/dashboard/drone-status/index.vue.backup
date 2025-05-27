@@ -6,6 +6,8 @@ import SockJS from 'sockjs-client';
 import Stomp from 'webstomp-client';
 // @ts-ignore
 import axios from 'axios';
+// 导入权限相关store
+import { useAccessStore, useUserStore } from '@vben/stores';
 // 导入地图组件
 import BaiduMap from './BaiduMap.vue';
 // 导入地理围栏API方法
@@ -137,6 +139,25 @@ const simulationInterval = ref(2000);
 // WebSocket客户端
 const stompClient = ref<any>(null);
 const connected = ref(false);
+
+// 权限相关
+const accessStore = useAccessStore();
+const userStore = useUserStore();
+
+// 检查用户权限
+const hasAdminOrOperatorRole = computed(() => {
+  const userRoles = userStore.userRoles || [];
+  const hasRole = userRoles.includes('ADMIN') || userRoles.includes('OPERATOR');
+  console.log('用户角色:', userRoles, '是否有权限:', hasRole);
+  return hasRole;
+});
+
+// 检查认证状态
+const isAuthenticated = computed(() => {
+  const hasToken = !!accessStore.accessToken;
+  console.log('认证状态:', hasToken, 'Token:', accessStore.accessToken?.substring(0, 20) + '...');
+  return hasToken;
+});
 
 // MQTT消息模态框
 const mqttModalVisible = ref(false);
@@ -1344,40 +1365,45 @@ const sendMqttMessage = async () => {
   try {
     // 根据消息类型选择不同的API
     let response: MqttMessageResponse;
-    if (mqttForm.messageType === 'CONSOLE') {
+    if (mqttForm.messageType === 'console') {
       // 发送控制台消息
-      response = await sendConsoleMessageToDrone(
-        selectedDrone.value.droneId, 
-        mqttForm.message,
-        mqttForm.priority as 'LOW' | 'NORMAL' | 'HIGH',
-        mqttForm.requireAck
-      );
+      response = await sendConsoleMessageToDrone(selectedDrone.value.droneId, {
+        message: mqttForm.message,
+        priority: mqttForm.priority,
+        requireAck: mqttForm.requireAck,
+      });
     } else {
       // 发送自定义MQTT消息
-      const request: MqttMessageRequest = {
-        topic: mqttForm.topic,
+      response = await sendMqttMessageToDrone(selectedDrone.value.droneId, {
         message: mqttForm.message,
-        messageType: mqttForm.messageType,
-        qos: mqttForm.qos as 0 | 1 | 2,
+        topic: mqttForm.topic,
+        qos: mqttForm.qos,
         retained: mqttForm.retained,
-      };
-      response = await sendMqttMessageToDrone(selectedDrone.value.droneId, request);
+        messageType: mqttForm.messageType,
+      });
     }
 
     if (response.success) {
       notification.success({
-        message: 'MQTT消息发送成功',
-        description: `消息已发送给无人机 ${selectedDrone.value.serialNumber}`,
+        message: '发送成功',
+        description: `消息已发送到主题: ${response.topic}`,
       });
-
-      // 关闭对话框并重置表单
-      mqttModalVisible.value = false;
+      
+      // 清空表单
       mqttForm.message = '';
+      mqttModalVisible.value = false;
+    } else {
+      notification.error({
+        message: '发送失败',
+        description: response.message || '未知错误',
+      });
     }
-    // 移除失败提示，静默处理失败情况
-  } catch (error) {
+  } catch (error: any) {
     console.error('发送MQTT消息失败:', error);
-    // 移除失败提示，静默处理异常情况
+    notification.error({
+      message: '发送失败',
+      description: error.response?.data?.message || error.message || '网络错误',
+    });
   } finally {
     mqttSending.value = false;
   }

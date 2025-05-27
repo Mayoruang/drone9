@@ -1,12 +1,12 @@
 import { requestClient as defHttp } from '../request';
 
 enum Api {
-  AllDrones = '/api/v1/monitor/drones',
-  DronesByStatus = '/api/v1/monitor/drones/status',
-  DroneDetail = '/api/v1/monitor/drones',
-  LatestTelemetry = '/api/v1/monitor/drones/{id}/telemetry/latest',
-  TelemetryHistory = '/api/v1/monitor/drones/{id}/telemetry/history',
-  DronesForMap = '/api/v1/monitor/drones/map',
+  AllDrones = '/v1/monitor/drones',
+  DronesByStatus = '/v1/monitor/drones/status',
+  DroneDetail = '/v1/monitor/drones',
+  LatestTelemetry = '/v1/monitor/drones/{id}/telemetry/latest',
+  TelemetryHistory = '/v1/monitor/drones/{id}/telemetry/history',
+  DronesForMap = '/v1/monitor/drones/map',
 }
 
 export interface DroneStatus {

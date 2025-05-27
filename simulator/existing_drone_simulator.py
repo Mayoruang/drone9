@@ -31,7 +31,16 @@ class DroneSimulator:
         # MQTT主题
         self.telemetry_topic = f"drones/{self.drone_id}/telemetry"
         self.commands_topic = f"drones/{self.drone_id}/commands"
+        self.console_topic = f"drones/{self.drone_id}/console"
         self.responses_topic = f"drones/{self.drone_id}/responses"
+        
+        # 订阅的主题列表
+        self.subscribed_topics = [
+            self.commands_topic,
+            self.console_topic,
+            f"drones/{self.drone_id}/custom",  # 自定义主题
+            f"drones/{self.drone_id}/#"       # 通配符，订阅所有相关主题
+        ]
         
         # 生成沈阳市内随机初始位置
         initial_lat, initial_lon = self.generate_random_shenyang_position()
@@ -118,8 +127,19 @@ class DroneSimulator:
         print(f'连接到MQTT代理，返回码: {rc}')
         if rc == 0:
             self.mqtt_connected.set()
-            client.subscribe(self.commands_topic)
-            print(f'订阅命令主题: {self.commands_topic}')
+            
+            # 订阅所有相关主题
+            for topic in self.subscribed_topics:
+                try:
+                    result = client.subscribe(topic)
+                    if result[0] == mqtt.MQTT_ERR_SUCCESS:
+                        print(f'✅ 订阅主题: {topic}')
+                    else:
+                        print(f'❌ 订阅主题失败: {topic}, 错误码: {result[0]}')
+                except Exception as e:
+                    print(f'❌ 订阅主题异常: {topic}, 错误: {e}')
+                    
+            print(f'📡 总共订阅了 {len(self.subscribed_topics)} 个主题')
         else:
             print(f'连接失败，返回码: {rc}')
 
@@ -128,14 +148,60 @@ class DroneSimulator:
         self.mqtt_connected.clear()
 
     def on_message(self, client, userdata, msg):
-        """处理接收到的命令"""
+        """处理接收到的所有类型消息"""
+        topic = msg.topic
+        payload = msg.payload.decode()
+        
+        # 美观的消息头部显示
+        print("\n" + "="*80)
+        print(f"📨 收到MQTT消息")
+        print(f"🏷️  主题: {topic}")
+        print(f"⏰ 时间: {time.strftime('%Y-%m-%d %H:%M:%S')}")
+        print("-"*80)
+        
         try:
-            command = json.loads(msg.payload.decode())
-            command_type = command.get('type')
-            command_id = command.get('commandId', 'unknown')
-            parameters = command.get('parameters', {})
+            # 尝试解析JSON
+            try:
+                message_data = json.loads(payload)
+                is_json = True
+            except json.JSONDecodeError:
+                message_data = payload
+                is_json = False
             
-            print(f'收到命令: {command_type}, ID: {command_id}, 参数: {parameters}')
+            # 根据主题类型处理消息
+            if topic == self.commands_topic:
+                self.handle_command_message(message_data, client)
+            elif topic == self.console_topic:
+                self.handle_console_message(message_data)
+            elif topic.endswith('/custom') or 'custom' in topic:
+                self.handle_custom_message(message_data, topic)
+            else:
+                self.handle_unknown_message(message_data, topic, is_json)
+                
+        except Exception as e:
+            print(f"❌ 处理消息时出错: {e}")
+            print(f"📄 原始消息内容: {payload}")
+        
+        print("="*80 + "\n")
+
+    def handle_command_message(self, message_data, client):
+        """处理飞行命令消息"""
+        print("🎮 消息类型: 飞行命令")
+        
+        if isinstance(message_data, dict):
+            command_type = message_data.get('type', 'UNKNOWN')
+            command_id = message_data.get('commandId', 'unknown')
+            parameters = message_data.get('parameters', {})
+            
+            print(f"🚁 命令类型: {command_type}")
+            print(f"🆔 命令ID: {command_id}")
+            
+            if parameters:
+                print("📋 命令参数:")
+                for key, value in parameters.items():
+                    print(f"   • {key}: {value}")
+            else:
+                print("📋 命令参数: 无")
             
             # 发送命令确认函数
             def send_command_ack(status, message):
@@ -154,13 +220,93 @@ class DroneSimulator:
                 except Exception as e:
                     print(f'❌ 发送命令确认失败: {e}')
             
-            # 处理各种命令
+            # 处理命令
+            print(f"⚙️  开始执行命令...")
             self.process_command(command_type, parameters, send_command_ack)
+        else:
+            print(f"⚠️  无效的命令格式: {message_data}")
+
+    def handle_console_message(self, message_data):
+        """处理控制台消息"""
+        print("💬 消息类型: 控制台消息")
+        
+        if isinstance(message_data, dict):
+            message = message_data.get('message', '')
+            priority = message_data.get('priority', 'NORMAL')
+            require_ack = message_data.get('requireAck', False)
+            message_id = message_data.get('messageId', 'unknown')
+            timestamp = message_data.get('timestamp', time.time())
             
-        except json.JSONDecodeError as e:
-            print(f'❌ 解析命令JSON失败: {e}')
-        except Exception as e:
-            print(f'❌ 处理命令时出错: {e}')
+            # 根据优先级选择不同的图标和颜色提示
+            priority_icons = {
+                'LOW': '🔵',
+                'NORMAL': '🟡', 
+                'HIGH': '🔴'
+            }
+            priority_icon = priority_icons.get(priority, '⚪')
+            
+            print(f"{priority_icon} 优先级: {priority}")
+            print(f"🆔 消息ID: {message_id}")
+            print(f"⏰ 时间戳: {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(timestamp))}")
+            print(f"📝 消息内容:")
+            print(f"   「{message}」")
+            print(f"✅ 需要确认: {'是' if require_ack else '否'}")
+            
+            # 如果需要确认，可以在这里添加确认逻辑
+            if require_ack:
+                print("📨 注意: 此消息需要确认回复")
+                
+        elif isinstance(message_data, str):
+            print(f"📝 简单消息: 「{message_data}」")
+        else:
+            print(f"⚠️  无法解析的控制台消息: {message_data}")
+
+    def handle_custom_message(self, message_data, topic):
+        """处理自定义MQTT消息"""
+        print("🔧 消息类型: 自定义MQTT消息")
+        print(f"🎯 自定义主题: {topic}")
+        
+        if isinstance(message_data, dict):
+            message_type = message_data.get('messageType', 'UNKNOWN')
+            qos = message_data.get('qos', 0)
+            retained = message_data.get('retained', False)
+            message_id = message_data.get('messageId', 'unknown')
+            
+            print(f"📂 消息类型: {message_type}")
+            print(f"🆔 消息ID: {message_id}")
+            print(f"⚡ QoS级别: {qos}")
+            print(f"📌 保留消息: {'是' if retained else '否'}")
+            
+            # 显示消息内容
+            if 'message' in message_data:
+                print(f"📝 消息内容:")
+                print(f"   「{message_data['message']}」")
+            
+            # 显示其他字段
+            other_fields = {k: v for k, v in message_data.items() 
+                          if k not in ['messageType', 'qos', 'retained', 'messageId', 'message']}
+            if other_fields:
+                print("📋 其他字段:")
+                for key, value in other_fields.items():
+                    print(f"   • {key}: {value}")
+                    
+        elif isinstance(message_data, str):
+            print(f"📝 自定义消息内容: 「{message_data}」")
+        else:
+            print(f"📄 原始数据: {message_data}")
+
+    def handle_unknown_message(self, message_data, topic, is_json):
+        """处理未知类型的消息"""
+        print("❓ 消息类型: 未知/其他")
+        print(f"🏷️  完整主题: {topic}")
+        print(f"📊 数据格式: {'JSON' if is_json else '纯文本'}")
+        
+        if is_json and isinstance(message_data, dict):
+            print("📋 JSON内容:")
+            for key, value in message_data.items():
+                print(f"   • {key}: {value}")
+        else:
+            print(f"📝 消息内容: 「{message_data}」")
 
     def is_on_ground(self):
         """检查无人机是否在地面"""
@@ -613,9 +759,21 @@ class DroneSimulator:
         print(f'🚁 启动已注册无人机模拟器')
         print(f'📋 序列号: {self.drone_info.get("serialNumber", "Unknown")}')
         print(f'🆔 UUID: {self.drone_id}')
-        print(f'📡 遥测主题: {self.telemetry_topic}')
-        print(f'🎮 命令主题: {self.commands_topic}')
-        print(f'📤 响应主题: {self.responses_topic}')
+        print(f'📡 发布主题:')
+        print(f'   • 遥测数据: {self.telemetry_topic}')
+        print(f'   • 命令响应: {self.responses_topic}')
+        print(f'📨 订阅主题:')
+        for i, topic in enumerate(self.subscribed_topics, 1):
+            topic_type = ""
+            if topic == self.commands_topic:
+                topic_type = " (飞行命令)"
+            elif topic == self.console_topic:
+                topic_type = " (控制台消息)"
+            elif 'custom' in topic:
+                topic_type = " (自定义消息)"
+            elif topic.endswith('/#'):
+                topic_type = " (通配符订阅)"
+            print(f'   {i}. {topic}{topic_type}')
         
         # 连接MQTT
         client_id = f"sim-drone-{self.drone_id[:8]}-{str(uuid.uuid4())[:4]}"
@@ -633,6 +791,7 @@ class DroneSimulator:
             telemetry_thread.start()
             
             print('✅ 模拟器已启动，等待命令...')
+            print('📱 现在可以从前端发送控制台消息和自定义MQTT消息了！')
             print('按 Ctrl+C 停止模拟器')
             
             # 主循环

@@ -33,7 +33,6 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
     // 定义不需要进行JWT验证的路径
     private final List<String> excludedPaths = Arrays.asList(
             "/api/auth/**",
-            "/api/v1/drones/**",
             "/api/test/**",
             "/api/status",
             "/api/v1/drones/register",

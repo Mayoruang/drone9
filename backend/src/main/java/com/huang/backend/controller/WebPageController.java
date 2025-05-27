@@ -12,20 +12,20 @@ public class WebPageController {
     /**
      * Serve the WebSocket test page
      * 
-     * @return view name
+     * @return redirect to static HTML file
      */
     @GetMapping("/websocket-test")
     public String websocketTest() {
-        return "test-websocket";
+        return "redirect:/test-websocket.html";
     }
     
     /**
      * Serve the MQTT test page
      * 
-     * @return view name
+     * @return redirect to static HTML file
      */
     @GetMapping("/mqtt-test")
     public String mqttTest() {
-        return "mqtt-test";
+        return "redirect:/mqtt-test.html";
     }
 } 
