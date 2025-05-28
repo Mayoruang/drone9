@@ -13,10 +13,16 @@ import uuid
 import signal
 import sys
 import requests
+import re
 from datetime import datetime
 
 # --- 配置常量 ---
-DEFAULT_BACKEND_URL = "http://localhost:8080/api/v1"
+# 支持多种后端地址检测
+DEFAULT_BACKEND_URLS = [
+    "http://localhost:8080/api/v1",  # Docker宿主机
+    "http://127.0.0.1:8080/api/v1",  # 本地环回
+    "http://host.docker.internal:8080/api/v1"  # Docker内部访问宿主机
+]
 DEFAULT_MODEL = "SimDrone-X2"
 DEFAULT_POLL_INTERVAL = 10      # 秒
 DEFAULT_MAX_POLLS = 60          # 最多轮询60次（10分钟）
@@ -29,11 +35,67 @@ STATUS_REJECTED = "REJECTED"
 # --- 全局变量 ---
 stop_event = False
 
+def detect_backend_url():
+    """自动检测可用的后端服务地址"""
+    import socket
+    
+    # 检查8080端口是否可访问
+    def check_port(host, port, timeout=3):
+        try:
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.settimeout(timeout)
+            result = sock.connect_ex((host, port))
+            sock.close()
+            return result == 0
+        except:
+            return False
+    
+    # 检测顺序：localhost -> 127.0.0.1
+    if check_port('localhost', 8080):
+        return "http://localhost:8080/api/v1"
+    elif check_port('127.0.0.1', 8080):
+        return "http://127.0.0.1:8080/api/v1"
+    else:
+        log_warn("无法检测到后端服务，将使用默认地址")
+        return "http://localhost:8080/api/v1"
+
 def get_serial_number(provided_serial):
     """生成或使用提供的序列号"""
     if provided_serial:
         return provided_serial
     return f"SIM-{str(uuid.uuid4())[:12].upper()}"
+
+def validate_serial_number(serial_number):
+    """验证序列号格式"""
+    # 检查序列号是否只包含字母、数字、连字符和下划线
+    if not re.match(r'^[a-zA-Z0-9_-]+$', serial_number):
+        return False, "序列号只能包含字母、数字、连字符(-)和下划线(_)"
+    
+    # 检查长度
+    if len(serial_number) < 1:
+        return False, "序列号不能为空"
+    
+    if len(serial_number) > 50:
+        return False, "序列号长度不能超过50个字符"
+    
+    return True, "有效的序列号"
+
+def suggest_serial_number(original_serial):
+    """为无效的序列号提供建议"""
+    # 移除无效字符，替换为下划线
+    clean_serial = re.sub(r'[^a-zA-Z0-9_-]', '_', original_serial)
+    
+    # 移除连续的下划线
+    clean_serial = re.sub(r'_+', '_', clean_serial)
+    
+    # 移除开头和结尾的下划线
+    clean_serial = clean_serial.strip('_')
+    
+    # 如果太短，添加随机后缀
+    if len(clean_serial) < 3:
+        clean_serial = f"DRONE_{clean_serial}_{str(uuid.uuid4())[:8].upper()}"
+    
+    return clean_serial
 
 def log_info(message):
     """信息日志"""
@@ -64,14 +126,31 @@ def register_drone(serial_number, model, backend_url):
         "model": model,
         "notes": f"Python注册脚本生成的无人机 - {datetime.now().isoformat()}"
     }
+    
+    log_debug(f"注册请求数据: {json.dumps(payload, ensure_ascii=False, indent=2)}")
+    
     try:
         response = requests.post(f"{backend_url}/drones/register", json=payload, timeout=10)
-        response.raise_for_status()
+        
+        # 详细的错误处理
+        if not response.ok:
+            error_details = "未知错误"
+            try:
+                error_json = response.json()
+                error_details = error_json.get('message', error_json.get('error', str(error_json)))
+            except:
+                error_details = response.text if response.text else f"HTTP {response.status_code}"
+            
+            log_error(f"注册失败 (HTTP {response.status_code}): {error_details}")
+            log_debug(f"完整响应: {response.text}")
+            return None
+        
         data = response.json()
         log_info(f"注册请求已提交，请求ID: {data.get('requestId')}")
         return data.get("requestId")
+        
     except requests.exceptions.RequestException as e:
-        log_error(f"注册失败: {e}")
+        log_error(f"网络请求失败: {e}")
         return None
 
 def check_registration_status(request_id, backend_url):
@@ -123,13 +202,18 @@ def main():
     parser = argparse.ArgumentParser(description="无人机注册脚本 - 生成新无人机并注册到系统")
     parser.add_argument("--serial", help="自定义无人机序列号（可选，默认随机生成）")
     parser.add_argument("--model", default=DEFAULT_MODEL, help=f"无人机型号（默认: {DEFAULT_MODEL}）")
-    parser.add_argument("--backend-url", default=DEFAULT_BACKEND_URL, help=f"后端API地址（默认: {DEFAULT_BACKEND_URL}）")
+    parser.add_argument("--backend-url", help=f"后端API地址（默认: 自动检测）")
     parser.add_argument("--poll-interval", type=int, default=DEFAULT_POLL_INTERVAL, help=f"注册状态查询间隔秒数（默认: {DEFAULT_POLL_INTERVAL}）")
     parser.add_argument("--max-polls", type=int, default=DEFAULT_MAX_POLLS, help=f"最大查询次数（默认: {DEFAULT_MAX_POLLS}）")
     parser.add_argument("--list", "-l", action="store_true", help="列出系统中已注册的无人机")
     parser.add_argument("--verbose", "-v", action="store_true", help="详细输出")
     
     args = parser.parse_args()
+    
+    # 如果未指定后端URL，自动检测
+    if not args.backend_url:
+        log_info("🔍 自动检测后端服务地址...")
+        args.backend_url = detect_backend_url()
     
     # 设置信号处理
     signal.signal(signal.SIGINT, signal_handler)
@@ -146,6 +230,34 @@ def main():
     
     # 生成序列号
     serial_number = get_serial_number(args.serial)
+    
+    # 验证序列号格式
+    is_valid, validation_message = validate_serial_number(serial_number)
+    if not is_valid:
+        log_error(f"❌ 序列号格式无效: {validation_message}")
+        log_error(f"   当前序列号: {serial_number}")
+        
+        # 提供建议的序列号
+        suggested_serial = suggest_serial_number(serial_number)
+        log_info(f"💡 建议使用的序列号: {suggested_serial}")
+        log_info(f"📋 序列号格式要求:")
+        log_info(f"   - 只能包含字母、数字、连字符(-)和下划线(_)")
+        log_info(f"   - 长度在1-50个字符之间")
+        log_info(f"   - 例如: DRONE-001, UAV_X2, SIM-ABC123")
+        
+        # 询问是否使用建议的序列号
+        print(f"\n是否使用建议的序列号 '{suggested_serial}'? (y/n): ", end="")
+        try:
+            choice = input().lower().strip()
+            if choice in ['y', 'yes', '是']:
+                serial_number = suggested_serial
+                log_info(f"✅ 已更新序列号为: {serial_number}")
+            else:
+                log_error("❌ 序列号无效且未使用建议序列号，退出程序")
+                return 1
+        except (KeyboardInterrupt, EOFError):
+            log_error("❌ 用户取消操作，退出程序")
+            return 1
     
     log_info(f"📋 无人机信息:")
     log_info(f"   序列号: {serial_number}")

@@ -1,0 +1,27 @@
+# 外部主机访问配置文件
+# 使用方法: java -jar backend.jar --spring.profiles.active=external
+
+server:
+  # 明确绑定到所有网络接口
+  address: 0.0.0.0
+  port: 8080
+
+application:
+  # 使用实际IP地址作为base-url
+  base-url: ${APPLICATION_BASE_URL:http://192.168.139.136:8080}
+  
+  # CORS配置 - 允许外部主机访问
+  cors:
+    # 允许特定IP地址范围而不是通配符，这样可以启用凭证
+    allowed-origins: "http://localhost:3000,http://localhost:3100,http://localhost:5666,http://localhost:5667,http://127.0.0.1:5666,http://192.168.139.136:5666,http://192.168.139.136:8080"
+    allowed-methods: "GET,POST,PUT,DELETE,OPTIONS,PATCH"
+    allowed-headers: "Authorization,Content-Type,X-Requested-With,Accept,Origin,Access-Control-Request-Method,Access-Control-Request-Headers"
+    max-age: 3600
+    allow-credentials: true  # 启用凭证支持，用于WebSocket连接
+
+# 日志配置 - 显示更多网络相关信息
+logging:
+  level:
+    org.springframework.web.cors: DEBUG
+    org.springframework.security.web: DEBUG
+    org.springframework.boot.web.embedded.tomcat: INFO 

@@ -1,0 +1,20 @@
+# 简化版Dockerfile - 用于快速启动和调试
+FROM openjdk:17-jdk-slim
+
+WORKDIR /app
+
+# 安装wget和curl用于健康检查
+RUN apt-get update && apt-get install -y wget curl && rm -rf /var/lib/apt/lists/*
+
+# 直接复制已构建的jar文件（需要先在本地构建）
+COPY target/*.jar app.jar
+
+# 暴露端口
+EXPOSE 8080
+
+# 简单的健康检查
+HEALTHCHECK --interval=30s --timeout=3s --start-period=60s --retries=3 \
+  CMD curl -f http://localhost:8080/actuator/health || exit 1
+
+# 启动应用
+ENTRYPOINT ["java", "-jar", "app.jar"] 

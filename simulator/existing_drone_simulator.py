@@ -16,14 +16,74 @@ import math
 import argparse
 import requests
 import random
+import socket
 import paho.mqtt.client as mqtt
 
+def detect_backend_url():
+    """自动检测可用的后端服务地址"""
+    # 检查8080端口是否可访问
+    def check_port(host, port, timeout=3):
+        try:
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.settimeout(timeout)
+            result = sock.connect_ex((host, port))
+            sock.close()
+            return result == 0
+        except:
+            return False
+    
+    # 检测顺序：localhost -> 127.0.0.1
+    if check_port('localhost', 8080):
+        return "http://localhost:8080"
+    elif check_port('127.0.0.1', 8080):
+        return "http://127.0.0.1:8080"
+    else:
+        print("⚠️ 无法检测到后端服务，将使用默认地址")
+        return "http://localhost:8080"
+
+def detect_mqtt_host():
+    """自动检测可用的MQTT服务地址"""
+    # 检查1883端口是否可访问
+    def check_port(host, port, timeout=3):
+        try:
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.settimeout(timeout)
+            result = sock.connect_ex((host, port))
+            sock.close()
+            return result == 0
+        except:
+            return False
+    
+    # 检测顺序：localhost -> 127.0.0.1
+    if check_port('localhost', 1883):
+        return "localhost"
+    elif check_port('127.0.0.1', 1883):
+        return "127.0.0.1"
+    else:
+        print("⚠️ 无法检测到MQTT服务，将使用默认地址")
+        return "localhost"
+
 class DroneSimulator:
-    def __init__(self, drone_id, backend_url="http://localhost:8080"):
+    def __init__(self, drone_id, backend_url=None, mqtt_host=None):
         self.drone_id = drone_id
-        self.backend_url = backend_url
-        self.mqtt_host = "localhost"
+        
+        # 自动检测服务地址
+        if backend_url is None:
+            print("🔍 自动检测后端服务地址...")
+            self.backend_url = detect_backend_url()
+        else:
+            self.backend_url = backend_url
+            
+        if mqtt_host is None:
+            print("🔍 自动检测MQTT服务地址...")
+            self.mqtt_host = detect_mqtt_host()
+        else:
+            self.mqtt_host = mqtt_host
+            
         self.mqtt_port = 1883
+        
+        print(f"🌐 后端服务地址: {self.backend_url}")
+        print(f"📡 MQTT服务地址: {self.mqtt_host}:{self.mqtt_port}")
         
         # 从后端获取无人机信息
         self.drone_info = self.fetch_drone_info()
@@ -834,13 +894,19 @@ def main():
     parser.add_argument('--drone-id', '-d', 
                        help='要模拟的无人机ID')
     parser.add_argument('--backend-url', '-b', 
-                       default='http://localhost:8080',
-                       help='后端服务URL (默认: http://localhost:8080)')
+                       help='后端服务URL (默认: 自动检测)')
+    parser.add_argument('--mqtt-host', '-m',
+                       help='MQTT服务主机 (默认: 自动检测)')
     parser.add_argument('--list', '-l', 
                        action='store_true',
                        help='列出系统中可用的无人机')
     
     args = parser.parse_args()
+    
+    # 自动检测后端服务地址
+    if not args.backend_url:
+        print("🔍 自动检测后端服务地址...")
+        args.backend_url = detect_backend_url()
     
     if args.list:
         list_available_drones(args.backend_url)
@@ -856,7 +922,7 @@ def main():
         return
     
     # 创建并启动模拟器
-    simulator = DroneSimulator(args.drone_id, args.backend_url)
+    simulator = DroneSimulator(args.drone_id, args.backend_url, args.mqtt_host)
     simulator.start()
 
 if __name__ == "__main__":

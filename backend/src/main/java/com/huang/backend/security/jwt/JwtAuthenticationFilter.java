@@ -39,6 +39,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             "/api/v1/drones/registration/**",
             "/api/v1/drones/management/**",
             "/api/v1/drones/test/**",
+            "/api/v1/admin/**",
             "/api/v1/geofences/**",
             "/actuator/**"
     );

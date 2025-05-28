@@ -51,34 +51,41 @@ services:
       EMQX_DASHBOARD__DEFAULT_PASSWORD: public
     restart: unless-stopped
 
-  # Spring Boot 后端 - 开发模式（使用本地代码）
-  # backend:
-  #   build:
-  #     context: ./backend
-  #     dockerfile: Dockerfile.dev
-  #   container_name: drone-backend
-  #   depends_on:
-  #     - postgres
-  #     - influxdb
-  #     - emqx
-  #   ports:
-  #     - "8080:8080"
-  #   volumes:
-  #     - ./backend:/app
-  #   environment:
-  #     SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/dronedb
-  #     SPRING_DATASOURCE_USERNAME: drone
-  #     SPRING_DATASOURCE_PASSWORD: dronepassword
-  #     INFLUXDB_URL: http://influxdb:8086
-  #     INFLUXDB_TOKEN: my-super-secret-token
-  #     INFLUXDB_ORG: drone_org
-  #     INFLUXDB_BUCKET: drone_data
-  #     MQTT_BROKER_URL: tcp://emqx:1883
-  #     MQTT_TOPICS_TELEMETRY: drones/+/telemetry
-  #     MQTT_TOPICS_COMMANDS: drones/+/commands
-  #     MQTT_TOPICS_RESPONSES: drones/+/responses
-  #   restart: unless-stopped
-    # 开发模式，不直接启动，仅提供环境
+  # Spring Boot 后端 - 生产模式
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    image: drone-backend:latest
+    container_name: drone-backend
+    depends_on:
+      - postgres
+      - influxdb
+      - emqx
+    ports:
+      - "0.0.0.0:8080:8080"  # 绑定到所有接口，允许外部访问
+    environment:
+      SPRING_PROFILES_ACTIVE: production
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/dronedb
+      SPRING_DATASOURCE_USERNAME: drone
+      SPRING_DATASOURCE_PASSWORD: dronepassword
+      INFLUXDB_URL: http://influxdb:8086
+      INFLUXDB_TOKEN: my-super-secret-token
+      INFLUXDB_ORG: drone_org
+      INFLUXDB_BUCKET: drone_data
+      MQTT_BROKER_URL: tcp://emqx:1883
+      MQTT_TOPICS_TELEMETRY: drones/+/telemetry
+      MQTT_TOPICS_COMMANDS: drones/+/commands
+      MQTT_TOPICS_RESPONSES: drones/+/responses
+      # JVM 配置优化
+      JAVA_OPTS: "-Xms512m -Xmx1024m -XX:+UseG1GC -XX:G1HeapRegionSize=16m -XX:+UseStringDeduplication"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8080/actuator/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
 
 volumes:
   postgres_data:

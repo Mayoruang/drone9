@@ -17,7 +17,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
-import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -34,7 +34,7 @@ public class RegistrationServiceImpl implements RegistrationService {
 
     private final DroneRegistrationRequestRepository registrationRepository;
     private final DroneRepository droneRepository;
-    private final BCryptPasswordEncoder passwordEncoder;
+    private final PasswordEncoder passwordEncoder;
     private final SimpMessagingTemplate messagingTemplate;
     
     @Value("${application.base-url:http://localhost:8080}")
@@ -57,7 +57,7 @@ public class RegistrationServiceImpl implements RegistrationService {
     public RegistrationServiceImpl(
             DroneRegistrationRequestRepository registrationRepository,
             DroneRepository droneRepository,
-            BCryptPasswordEncoder passwordEncoder,
+            PasswordEncoder passwordEncoder,
             SimpMessagingTemplate messagingTemplate) {
         this.registrationRepository = registrationRepository;
         this.droneRepository = droneRepository;

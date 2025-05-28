@@ -58,8 +58,14 @@ public class WebSecurityConfig {
                         .requestMatchers("/api/v1/drones/*/console-message").authenticated()
                         .requestMatchers("/api/v1/drones/*/mqtt-message").authenticated()
                         .requestMatchers("/api/v1/drones/**").permitAll()
+                        .requestMatchers("/api/v1/monitor/**").permitAll()
+                        .requestMatchers("/api/v1/admin/**").permitAll()
                         .requestMatchers("/api/v1/geofences/**").permitAll() 
+                        .requestMatchers("/api/v1/auth/**").permitAll()
                         .requestMatchers("/api/auth/**").permitAll()
+                        .requestMatchers("/api/v1/user/**").authenticated()
+                        .requestMatchers("/api/user/**").authenticated()
+                        .requestMatchers("/api/upload/**").authenticated()
                         .requestMatchers("/api/test/**").permitAll()
                         .requestMatchers("/api/status").permitAll()
                         .requestMatchers("/actuator/**").permitAll()
@@ -80,11 +86,30 @@ public class WebSecurityConfig {
     @Bean
     public CorsConfigurationSource corsConfigurationSource() {
         CorsConfiguration configuration = new CorsConfiguration();
-        configuration.setAllowedOrigins(Arrays.asList(allowedOrigins.split(",")));
+        
+        // 处理allowed-origins配置，支持通配符和具体域名
+        String[] origins = allowedOrigins.split(",");
+        List<String> originsList = Arrays.asList(origins);
+        
+        // 如果包含通配符，使用setAllowedOriginPatterns；否则使用setAllowedOrigins
+        if (allowedOrigins.contains("*")) {
+            configuration.setAllowedOriginPatterns(originsList);
+        } else {
+            configuration.setAllowedOrigins(originsList);
+        }
+        
         configuration.setAllowedMethods(Arrays.asList(allowedMethods.split(",")));
         configuration.setAllowedHeaders(Arrays.asList(allowedHeaders.split(",")));
         configuration.setAllowCredentials(allowCredentials);
         configuration.setMaxAge(maxAge);
+        
+        // 添加调试日志
+        System.out.println("CORS Configuration:");
+        System.out.println("- Allowed Origins: " + originsList);
+        System.out.println("- Allowed Methods: " + Arrays.asList(allowedMethods.split(",")));
+        System.out.println("- Allowed Headers: " + Arrays.asList(allowedHeaders.split(",")));
+        System.out.println("- Allow Credentials: " + allowCredentials);
+        System.out.println("- Max Age: " + maxAge);
 
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
         source.registerCorsConfiguration("/**", configuration);

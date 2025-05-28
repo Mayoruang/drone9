@@ -129,7 +129,11 @@ const mapScriptLoaded = ref(false);
 const mapScriptContainer = ref<HTMLDivElement | null>(null);
 
 // 测试相关状态
-const backendApiUrl = ref('http://localhost:8080');
+const backendApiUrl = ref(
+  import.meta.env.VITE_GLOB_API_URL?.replace('/api', '') ||
+  import.meta.env.VITE_API_URL?.replace('/api', '') ||
+  'http://localhost:8080'
+);
 const droneCount = ref(5);
 const simulationActive = ref(false);
 const simulationInterval = ref(2000);
@@ -238,13 +242,13 @@ const activeDrones = computed(() => {
 
 // ===== 遥控器相关计算属性 =====
 const canSendCommand = computed(() => {
-  return selectedDrone.value && 
-         availability.value?.available !== false && 
+  return selectedDrone.value &&
+         availability.value?.available !== false &&
          !commandLoading.value;
 });
 
 const isGotoValid = computed(() => {
-  return gotoParams.latitude !== null && 
+  return gotoParams.latitude !== null &&
          gotoParams.longitude !== null &&
          gotoParams.latitude >= -90 && gotoParams.latitude <= 90 &&
          gotoParams.longitude >= -180 && gotoParams.longitude <= 180;
@@ -387,7 +391,7 @@ const handleMarkerClick = (drone: DroneData) => {
   console.log('标记被点击', drone);
   selectedDrone.value = drone;
   drawerVisible.value = true;
-  
+
   // 当选中无人机时，自动加载并显示其关联的地理围栏
   if (showDroneGeofences.value) {
     // 延迟加载地理围栏，确保地图已经准备好
@@ -857,7 +861,7 @@ const sendCommand = () => {
 
 const checkAvailability = async () => {
   if (!selectedDrone.value) return;
-  
+
   availabilityLoading.value = true;
   try {
     availability.value = await checkDroneAvailability(selectedDrone.value.droneId);
@@ -880,10 +884,10 @@ const sendQuickCommand = async (action: string) => {
 
   commandLoading.value = true;
   console.log(`🚀 开始发送${action}命令到无人机 ${selectedDrone.value.droneId}`);
-  
+
   try {
     let response: DroneCommandResponse;
-    
+
     switch (action) {
       case 'RETURN_TO_HOME':
         console.log('📡 调用returnToHome API');
@@ -914,22 +918,22 @@ const sendQuickCommand = async (action: string) => {
         const defaultCommand = createDroneCommand(action as any);
         response = await sendDroneControlCommand(selectedDrone.value.droneId, defaultCommand);
     }
-    
+
     console.log(`📊 ${action}命令最终响应:`, response);
     console.log(`🔍 响应详细信息: success=${response?.success} (type: ${typeof response?.success}), message="${response?.message}"`);
-    
+
     // 检查响应的success字段 - 使用更宽松的判断条件
     const isSuccess = response && (
-      response.success === true || 
-      String(response.success) === 'true' || 
+      response.success === true ||
+      String(response.success) === 'true' ||
       (response.message && response.message.includes('成功'))
     );
-    
+
     if (isSuccess) {
       console.log(`✅ ${action}命令发送成功`);
       // 移除notification.success调用
       updateResponse(`快速命令: ${action}`, response);
-      
+
       // 延迟加载命令历史，避免并发请求冲突
       setTimeout(() => {
         loadCommandHistory().catch(err => {
@@ -957,14 +961,14 @@ const showTakeoffDialog = () => {
 
 const confirmTakeoff = async () => {
   if (!selectedDrone.value || !takeoffAltitude.value) return;
-  
+
   takeoffDialogVisible.value = false;
   commandLoading.value = true;
-  
+
   try {
     const command = createTakeoffCommand(takeoffAltitude.value);
     const response = await sendDroneControlCommand(selectedDrone.value.droneId, command);
-    
+
     if (response.success) {
       // notification.success({ message: `起飞命令发送成功 (高度: ${takeoffAltitude.value}m)` });
       console.log(`✅ 起飞命令发送成功 (高度: ${takeoffAltitude.value}m)`);
@@ -986,7 +990,7 @@ const confirmTakeoff = async () => {
 
 const sendGotoCommand = async () => {
   if (!selectedDrone.value || !isGotoValid.value) return;
-  
+
   commandLoading.value = true;
   try {
     const command = createMoveToCommand(
@@ -995,9 +999,9 @@ const sendGotoCommand = async () => {
       gotoParams.altitude,
       gotoParams.speed
     );
-    
+
     const response = await sendDroneControlCommand(selectedDrone.value.droneId, command);
-    
+
     if (response.success) {
       // notification.success({ message: 'GOTO 命令发送成功' });
       console.log('✅ GOTO 命令发送成功');
@@ -1019,12 +1023,12 @@ const sendGotoCommand = async () => {
 
 const setAltitude = async () => {
   if (!selectedDrone.value || !altitudeValue.value) return;
-  
+
   commandLoading.value = true;
   try {
     const command = createSetAltitudeCommand(altitudeValue.value);
     const response = await sendDroneControlCommand(selectedDrone.value.droneId, command);
-    
+
     if (response.success) {
       // notification.success({ message: `设置高度成功: ${altitudeValue.value}m` });
       console.log(`✅ 设置高度成功: ${altitudeValue.value}m`);
@@ -1046,12 +1050,12 @@ const setAltitude = async () => {
 
 const setSpeed = async () => {
   if (!selectedDrone.value || !speedValue.value) return;
-  
+
   commandLoading.value = true;
   try {
     const command = createSetSpeedCommand(speedValue.value);
     const response = await sendDroneControlCommand(selectedDrone.value.droneId, command);
-    
+
     if (response.success) {
       // notification.success({ message: `设置速度成功: ${speedValue.value}m/s` });
       console.log(`✅ 设置速度成功: ${speedValue.value}m/s`);
@@ -1073,7 +1077,7 @@ const setSpeed = async () => {
 
 const startPatrol = async () => {
   if (!selectedDrone.value) return;
-  
+
   commandLoading.value = true;
   try {
     const command = createPatrolCommand(
@@ -1082,9 +1086,9 @@ const startPatrol = async () => {
       patrolParams.altitude,
       patrolParams.speed
     );
-    
+
     const response = await sendDroneControlCommand(selectedDrone.value.droneId, command);
-    
+
     if (response.success) {
       // notification.success({ message: `开始${patrolParams.trajectoryType}轨迹巡航` });
       console.log(`✅ 开始${patrolParams.trajectoryType}轨迹巡航`);
@@ -1106,12 +1110,12 @@ const startPatrol = async () => {
 
 const stopPatrol = async () => {
   if (!selectedDrone.value) return;
-  
+
   commandLoading.value = true;
   try {
     const command = createDroneCommand('STOP_PATROL');
     const response = await sendDroneControlCommand(selectedDrone.value.droneId, command);
-    
+
     if (response.success) {
       // notification.success({ message: '停止巡航成功' });
       console.log('✅ 停止巡航成功');
@@ -1133,12 +1137,12 @@ const stopPatrol = async () => {
 
 const sendRawCommand = async () => {
   if (!selectedDrone.value || !rawCommand.value.trim()) return;
-  
+
   commandLoading.value = true;
   try {
     const commandObj = JSON.parse(rawCommand.value);
     const response = await apiSendRawCommand(selectedDrone.value.droneId, commandObj);
-    
+
     if (response.success) {
       // notification.success({ message: '原始命令发送成功' });
       console.log('✅ 原始命令发送成功');
@@ -1191,7 +1195,7 @@ const loadCommandTemplate = () => {
 
 const loadCommandHistory = async () => {
   if (!selectedDrone.value) return;
-  
+
   historyLoading.value = true;
   try {
     console.log('开始加载命令历史');
@@ -1215,7 +1219,7 @@ const clearHistory = () => {
 
 const cancelCommand = async (commandId: string) => {
   if (!selectedDrone.value) return;
-  
+
   try {
     const result = await cancelDroneCommand(selectedDrone.value.droneId, commandId);
     if (result.success) {
@@ -1326,7 +1330,7 @@ const openMqttModal = () => {
   mqttForm.requireAck = false;
   mqttForm.qos = 1;
   mqttForm.retained = false;
-  
+
   mqttModalVisible.value = true;
 };
 
@@ -1347,7 +1351,7 @@ const sendMqttMessage = async () => {
     if (mqttForm.messageType === 'CONSOLE') {
       // 发送控制台消息
       response = await sendConsoleMessageToDrone(
-        selectedDrone.value.droneId, 
+        selectedDrone.value.droneId,
         mqttForm.message,
         mqttForm.priority as 'LOW' | 'NORMAL' | 'HIGH',
         mqttForm.requireAck
@@ -1365,13 +1369,13 @@ const sendMqttMessage = async () => {
     }
 
     if (response.success) {
-      notification.success({
+  notification.success({
         message: 'MQTT消息发送成功',
         description: `消息已发送给无人机 ${selectedDrone.value.serialNumber}`,
-      });
+  });
 
       // 关闭对话框并重置表单
-      mqttModalVisible.value = false;
+  mqttModalVisible.value = false;
       mqttForm.message = '';
     }
     // 移除失败提示，静默处理失败情况
@@ -1520,19 +1524,19 @@ onUnmounted(() => {
 // 生命周期钩子
 onMounted(async () => {
   console.log('无人机状态监控组件已挂载');
-  
+
   try {
     // 连接WebSocket
     initWebSocket();
-    
+
     // 加载所有地理围栏数据，用于后续的无人机关联显示
     await loadAllGeofences();
-    
+
     // 初始化地图（使用延迟，确保DOM已渲染）
     setTimeout(() => {
       initBaiduMap();
     }, 1000);
-    
+
     // 5秒后检查数据状态
     setTimeout(() => {
       if (Object.keys(realDrones.value).length === 0) {
@@ -1543,7 +1547,7 @@ onMounted(async () => {
         });
       }
     }, 5000);
-    
+
     // 启动定期检查过期数据的定时器
     staleCheckInterval = setInterval(checkStaleData, 60000) as unknown as number; // 每60秒检查一次
   } catch (error) {
@@ -2267,7 +2271,7 @@ watch(selectedDrone, async (newDrone) => {
       loadDroneGeofences(),
       loadAvailableGeofences()
     ]);
-    
+
     // 当选中新的无人机时，自动更新地理围栏显示
     if (showDroneGeofences.value) {
       updateDroneGeofenceDisplay();
@@ -2318,7 +2322,7 @@ const geofenceTypeNames = {
 // 清除地图上的地理围栏显示
 const clearGeofenceOverlays = () => {
   if (!map.value) return;
-  
+
   geofenceOverlays.value.forEach(overlay => {
     map.value.removeOverlay(overlay);
   });
@@ -2328,32 +2332,32 @@ const clearGeofenceOverlays = () => {
 // 在地图上渲染地理围栏
 const renderGeofencesOnMap = (geofences: GeofenceData[]) => {
   if (!map.value || !window.BMap) return;
-  
+
   const BMap = window.BMap;
-  
+
   // 清除现有地理围栏
   clearGeofenceOverlays();
-  
+
   console.log(`准备在地图上渲染${geofences.length}个地理围栏`);
-  
+
   geofences.forEach(geofence => {
     try {
       // 将坐标转换为百度地图点
-      const points = geofence.coordinates.map(coord => 
+      const points = geofence.coordinates.map(coord =>
         new BMap.Point(coord.lng, coord.lat)
       );
-      
+
       if (points.length < 3) {
         console.warn(`地理围栏 ${geofence.name} 坐标点少于3个，跳过渲染`);
         return;
       }
-      
+
       // 获取样式配置
       const style = geofenceStyles[geofence.type] || geofenceStyles.RESTRICTED_ZONE;
-      
+
       // 创建多边形
       const polygon = new BMap.Polygon(points, style);
-      
+
       // 添加信息窗口
       const infoWindow = new BMap.InfoWindow(`
         <div style="width: 200px; padding: 8px; font-family: Arial, sans-serif;">
@@ -2374,22 +2378,22 @@ const renderGeofencesOnMap = (geofences: GeofenceData[]) => {
         width: 0,
         height: 0
       });
-      
+
       // 添加点击事件
       polygon.addEventListener('click', () => {
         polygon.openInfoWindow(infoWindow);
       });
-      
+
       // 添加到地图
       map.value.addOverlay(polygon);
       geofenceOverlays.value.push(polygon);
-      
+
       console.log(`已渲染地理围栏: ${geofence.name} (${geofence.type})`);
     } catch (error) {
       console.error(`渲染地理围栏 ${geofence.name} 时出错:`, error);
     }
   });
-  
+
   console.log(`成功渲染了${geofenceOverlays.value.length}个地理围栏`);
 };
 
@@ -2399,35 +2403,35 @@ const updateDroneGeofenceDisplay = async () => {
     clearGeofenceOverlays();
     return;
   }
-  
+
   try {
     console.log(`加载无人机 ${selectedDrone.value.serialNumber} 的关联地理围栏`);
-    
+
     // 获取无人机关联的地理围栏
     const droneGeofenceList = await getDroneGeofences(selectedDrone.value.droneId);
-    
+
     // 从所有地理围栏中筛选出该无人机关联的限制区
-    const associatedRestrictedZones = allGeofences.value.filter(geofence => 
-      geofence.type === 'RESTRICTED_ZONE' && 
+    const associatedRestrictedZones = allGeofences.value.filter(geofence =>
+      geofence.type === 'RESTRICTED_ZONE' &&
       droneGeofenceList.some(item => item.geofenceId === geofence.id)
     );
-    
+
     // 获取所有对全体无人机生效的禁飞区和允许飞行区
-    const globalZones = allGeofences.value.filter(geofence => 
+    const globalZones = allGeofences.value.filter(geofence =>
       geofence.type === 'NO_FLY_ZONE' || geofence.type === 'FLY_ZONE'
     );
-    
+
     // 合并所有需要显示的地理围栏
     const allZonesToDisplay = [...associatedRestrictedZones, ...globalZones];
-    
+
     if (allZonesToDisplay.length > 0) {
       console.log(`找到${associatedRestrictedZones.length}个关联的限制区和${globalZones.length}个全局区域，开始渲染`);
       renderGeofencesOnMap(allZonesToDisplay);
-      
+
       const restrictedCount = associatedRestrictedZones.length;
       const noFlyCount = globalZones.filter(z => z.type === 'NO_FLY_ZONE').length;
       const flyCount = globalZones.filter(z => z.type === 'FLY_ZONE').length;
-      
+
       notification.info({
         message: '地理围栏已显示',
         description: `已显示无人机 ${selectedDrone.value.serialNumber} 的飞行区域：
@@ -2439,14 +2443,14 @@ const updateDroneGeofenceDisplay = async () => {
     } else {
       console.log('该无人机没有关联的限制区，且当前没有全局区域');
       clearGeofenceOverlays();
-      
+
       notification.info({
         message: '无地理围栏',
         description: `无人机 ${selectedDrone.value.serialNumber} 没有关联的限制区，且当前没有全局禁飞区或允许飞行区`,
         duration: 3
       });
     }
-    
+
   } catch (error) {
     console.error('加载无人机地理围栏显示失败:', error);
     clearGeofenceOverlays();
@@ -2544,7 +2548,7 @@ const onGeofenceDisplayToggle = () => {
             <span>离线</span>
           </div>
         </div>
-        
+
         <!-- 地理围栏显示控制 -->
         <div class="mt-4 pt-3 border-t border-gray-200">
           <h4 class="text-sm font-medium mb-2">地理围栏显示</h4>
@@ -2677,7 +2681,7 @@ const onGeofenceDisplayToggle = () => {
                 <div class="grid grid-cols-2 gap-4 text-sm">
                   <div><strong>序列号:</strong> {{ selectedDrone?.serialNumber }}</div>
                   <div><strong>型号:</strong> {{ selectedDrone?.model }}</div>
-                  <div><strong>状态:</strong> 
+                  <div><strong>状态:</strong>
                     <Tag :color="getDroneStatusColor(selectedDrone?.status || '')">
                       {{ selectedDrone?.status }}
                     </Tag>
@@ -2691,8 +2695,8 @@ const onGeofenceDisplayToggle = () => {
               <!-- 快速命令 -->
               <Card title="快速命令" size="small">
                 <div class="grid grid-cols-2 gap-3">
-                  <Button 
-                    type="primary" 
+                  <Button
+                    type="primary"
                     @click="sendQuickCommand('ARM')"
                     :disabled="!canSendCommand"
                     :loading="commandLoading"
@@ -2700,7 +2704,7 @@ const onGeofenceDisplayToggle = () => {
                   >
                     解锁 (ARM)
                   </Button>
-                  <Button 
+                  <Button
                     @click="sendQuickCommand('DISARM')"
                     :disabled="!canSendCommand"
                     :loading="commandLoading"
@@ -2708,7 +2712,7 @@ const onGeofenceDisplayToggle = () => {
                   >
                     锁定 (DISARM)
                   </Button>
-                  <Button 
+                  <Button
                     type="primary"
                     @click="showTakeoffDialog"
                     :disabled="!canSendCommand"
@@ -2716,7 +2720,7 @@ const onGeofenceDisplayToggle = () => {
                   >
                     起飞
                   </Button>
-                  <Button 
+                  <Button
                     @click="sendQuickCommand('RETURN_TO_HOME')"
                     :disabled="!canSendCommand"
                     :loading="commandLoading"
@@ -2724,7 +2728,7 @@ const onGeofenceDisplayToggle = () => {
                   >
                     返航
                   </Button>
-                  <Button 
+                  <Button
                     @click="sendQuickCommand('LAND')"
                     :disabled="!canSendCommand"
                     :loading="commandLoading"
@@ -2732,7 +2736,7 @@ const onGeofenceDisplayToggle = () => {
                   >
                     降落
                   </Button>
-                  <Button 
+                  <Button
                     @click="sendQuickCommand('HOVER')"
                     :disabled="!canSendCommand"
                     :loading="commandLoading"
@@ -2741,11 +2745,11 @@ const onGeofenceDisplayToggle = () => {
                     悬停
                   </Button>
                 </div>
-                
+
                 <!-- 紧急操作 -->
                 <div class="mt-4 pt-4 border-t border-gray-200">
                   <div class="grid grid-cols-2 gap-3">
-                    <Button 
+                    <Button
                       danger
                       @click="confirmEmergencyStop"
                       :disabled="!selectedDrone"
@@ -2755,7 +2759,7 @@ const onGeofenceDisplayToggle = () => {
                       <template #icon><WarningOutlined /></template>
                       紧急停止
                     </Button>
-                    <Button 
+                    <Button
                       danger
                       @click="confirmEmergencyStopAll"
                       :loading="emergencyLoading"
@@ -2780,18 +2784,18 @@ const onGeofenceDisplayToggle = () => {
                         <div class="grid grid-cols-2 gap-3 mb-3">
               <div>
                             <label class="block text-sm font-medium mb-1">纬度</label>
-                            <Input 
-                              v-model:value="latitudeDisplay" 
-                              type="number" 
+                            <Input
+                              v-model:value="latitudeDisplay"
+                              type="number"
                               placeholder="如: 41.878113"
                               :step="0.000001"
                             />
                           </div>
                           <div>
                             <label class="block text-sm font-medium mb-1">经度</label>
-                            <Input 
-                              v-model:value="longitudeDisplay" 
-                              type="number" 
+                            <Input
+                              v-model:value="longitudeDisplay"
+                              type="number"
                               placeholder="如: 123.430201"
                               :step="0.000001"
                             />
@@ -2805,8 +2809,8 @@ const onGeofenceDisplayToggle = () => {
                             <Input v-model:value="gotoParams.speed" type="number" :min="1" :max="20" />
                           </div>
                         </div>
-                        <Button 
-                          type="primary" 
+                        <Button
+                          type="primary"
                           @click="sendGotoCommand"
                           :disabled="!canSendCommand || !isGotoValid"
                           :loading="commandLoading"
@@ -2820,16 +2824,16 @@ const onGeofenceDisplayToggle = () => {
                       <div class="grid grid-cols-2 gap-4">
                         <div class="p-4 border rounded-lg bg-gray-50">
                           <h4 class="font-medium mb-3">设置高度</h4>
-                          <Input 
-                            v-model:value="altitudeDisplay" 
-                            type="number" 
+                          <Input
+                            v-model:value="altitudeDisplay"
+                            type="number"
                             placeholder="高度 (米)"
                             :min="1"
                             :max="500"
                             class="mb-3"
                           />
-                          <Button 
-                            type="primary" 
+                          <Button
+                            type="primary"
                             @click="setAltitude"
                             :disabled="!canSendCommand || !altitudeDisplay"
                             :loading="commandLoading"
@@ -2840,16 +2844,16 @@ const onGeofenceDisplayToggle = () => {
                         </div>
                         <div class="p-4 border rounded-lg bg-gray-50">
                           <h4 class="font-medium mb-3">设置速度</h4>
-                          <Input 
-                            v-model:value="speedDisplay" 
-                            type="number" 
+                          <Input
+                            v-model:value="speedDisplay"
+                            type="number"
                             placeholder="速度 (m/s)"
                             :min="1"
                             :max="20"
                             class="mb-3"
                           />
-                          <Button 
-                            type="primary" 
+                          <Button
+                            type="primary"
                             @click="setSpeed"
                             :disabled="!canSendCommand || !speedDisplay"
                             :loading="commandLoading"
@@ -2891,8 +2895,8 @@ const onGeofenceDisplayToggle = () => {
                           </div>
                         </div>
                         <div class="flex space-x-3">
-                          <Button 
-                            type="primary" 
+                          <Button
+                            type="primary"
                             @click="startPatrol"
                             :disabled="!canSendCommand"
                             :loading="commandLoading"
@@ -2900,7 +2904,7 @@ const onGeofenceDisplayToggle = () => {
                           >
                             开始巡航
                           </Button>
-                          <Button 
+                          <Button
                             @click="stopPatrol"
                             :disabled="!canSendCommand"
                             :loading="commandLoading"
@@ -2929,8 +2933,8 @@ const onGeofenceDisplayToggle = () => {
                         placeholder="输入 JSON 格式的命令"
                         class="font-mono"
                 />
-                      <Button 
-                        type="primary" 
+                      <Button
+                        type="primary"
                         @click="sendRawCommand"
                         :disabled="!canSendCommand || !rawCommand.trim()"
                         :loading="commandLoading"
@@ -2957,8 +2961,8 @@ const onGeofenceDisplayToggle = () => {
                   </div>
                 </div>
                 <div class="space-y-2 max-h-64 overflow-y-auto">
-                  <div 
-                    v-for="cmd in commandHistory" 
+                  <div
+                    v-for="cmd in commandHistory"
                     :key="cmd.commandId"
                     class="p-3 border rounded-lg bg-gray-50"
                   >
@@ -2974,10 +2978,10 @@ const onGeofenceDisplayToggle = () => {
                           {{ formatTime(cmd.issuedAt) }}
                         </div>
                       </div>
-                      <Button 
+                      <Button
                         v-if="cmd.status === 'PENDING' || cmd.status === 'SENT'"
-                        size="small" 
-                        danger 
+                        size="small"
+                        danger
                         @click="cancelCommand(cmd.commandId)"
                       >
                         取消
@@ -3010,10 +3014,10 @@ const onGeofenceDisplayToggle = () => {
               <div class="space-y-4">
                 <div>
                   <label class="block text-sm font-medium mb-2">起飞高度 (米)</label>
-                  <Input 
-                    v-model:value="takeoffAltitude" 
-                    type="number" 
-                    :min="1" 
+                  <Input
+                    v-model:value="takeoffAltitude"
+                    type="number"
+                    :min="1"
                     :max="100"
                     placeholder="请输入起飞高度"
                   />
@@ -3324,10 +3328,10 @@ const onGeofenceDisplayToggle = () => {
         </Form.Item>
 
         <Form.Item label="消息内容">
-          <Input.TextArea 
-            v-model:value="mqttForm.message" 
-            :rows="4" 
-            placeholder="输入消息内容" 
+          <Input.TextArea
+            v-model:value="mqttForm.message"
+            :rows="4"
+            placeholder="输入消息内容"
             :maxLength="mqttForm.messageType === 'CONSOLE' ? 1000 : 2000"
             showCount
           />

@@ -1,0 +1,146 @@
+# 生产环境配置文件
+# 使用方法: java -jar backend.jar --spring.profiles.active=production
+
+server:
+  # 绑定到所有网络接口
+  address: 0.0.0.0
+  port: 8080
+  # 生产环境性能优化
+  tomcat:
+    threads:
+      max: 200
+      min-spare: 10
+    connection-timeout: 20000
+    max-connections: 8192
+
+spring:
+  # 数据源配置
+  datasource:
+    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://postgres:5432/dronedb}
+    username: ${SPRING_DATASOURCE_USERNAME:drone}
+    password: ${SPRING_DATASOURCE_PASSWORD:password}
+    driver-class-name: org.postgresql.Driver
+    hikari:
+      maximum-pool-size: 20
+      minimum-idle: 5
+      connection-timeout: 30000
+      idle-timeout: 600000
+      max-lifetime: 1800000
+
+  # JPA配置
+  jpa:
+    hibernate:
+      ddl-auto: update
+    properties:
+      hibernate:
+        dialect: org.hibernate.spatial.dialect.postgis.PostgisPG10Dialect
+        format_sql: false
+        show_sql: false
+    show-sql: false
+
+  # Redis配置（如果使用）
+  data:
+    redis:
+      host: redis
+      port: 6379
+      timeout: 2000ms
+      lettuce:
+        pool:
+          max-active: 8
+          max-idle: 8
+          min-idle: 0
+
+application:
+  # 使用环境变量中的域名
+  base-url: ${APPLICATION_BASE_URL:https://your-domain.com}
+  
+  # CORS配置 - 生产环境应限制为特定域名
+  cors:
+    allowed-origins: ${CORS_ALLOWED_ORIGINS:https://your-domain.com,https://www.your-domain.com}
+    allowed-methods: "GET,POST,PUT,DELETE,OPTIONS,PATCH"
+    allowed-headers: "Authorization,Content-Type,X-Requested-With,Accept,Origin,Access-Control-Request-Method,Access-Control-Request-Headers"
+    max-age: 3600
+    allow-credentials: true
+
+  # JWT配置
+  jwt:
+    secret-key: ${JWT_SECRET_KEY:your_very_long_and_secure_jwt_secret_key_here}
+    access-token-expiration: ${JWT_ACCESS_TOKEN_EXPIRATION:86400000}  # 24小时
+    refresh-token-expiration: ${JWT_REFRESH_TOKEN_EXPIRATION:604800000}  # 7天
+
+  # InfluxDB配置
+  influxdb:
+    url: ${INFLUXDB_URL:http://influxdb:8086}
+    token: ${INFLUXDB_TOKEN:your_influxdb_token}
+    org: ${INFLUXDB_ORG:drone_org}
+    bucket: ${INFLUXDB_BUCKET:drone_data}
+
+  # MQTT配置
+  mqtt:
+    broker-url: ${MQTT_BROKER_URL:tcp://emqx:1883}
+    client-id: drone-backend-prod
+    username: ${MQTT_USERNAME:admin}
+    password: ${MQTT_PASSWORD:public}
+    keep-alive: 60
+    connection-timeout: 30
+    clean-session: true
+
+  # 文件上传配置
+  file:
+    upload-path: /opt/drone-system/uploads
+    max-size: 10MB
+    allowed-types: jpg,jpeg,png,gif,pdf,doc,docx,xls,xlsx
+
+# 日志配置
+logging:
+  level:
+    root: INFO
+    com.huang.backend: INFO
+    org.springframework.security: WARN
+    org.springframework.web.cors: WARN
+    org.hibernate.SQL: WARN
+    org.hibernate.type.descriptor.sql.BasicBinder: WARN
+  pattern:
+    console: "%d{yyyy-MM-dd HH:mm:ss} [%thread] %-5level %logger{36} - %msg%n"
+    file: "%d{yyyy-MM-dd HH:mm:ss} [%thread] %-5level %logger{36} - %msg%n"
+  file:
+    name: /opt/logs/drone-backend.log
+    max-size: 100MB
+    max-history: 30
+
+# 管理端点配置
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+      base-path: /actuator
+  endpoint:
+    health:
+      show-details: when-authorized
+      show-components: when-authorized
+  metrics:
+    export:
+      prometheus:
+        enabled: true
+
+# WebSocket配置
+websocket:
+  allowed-origins: ${CORS_ALLOWED_ORIGINS:https://your-domain.com,https://www.your-domain.com}
+  
+# 安全配置
+security:
+  require-ssl: true
+  
+# 缓存配置
+cache:
+  type: redis
+  redis:
+    time-to-live: 600000  # 10分钟
+
+# 异步任务配置
+async:
+  core-pool-size: 5
+  max-pool-size: 20
+  queue-capacity: 100
+  thread-name-prefix: drone-async- 

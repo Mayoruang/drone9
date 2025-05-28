@@ -329,8 +329,16 @@ let wsService: DroneWebSocketService | null = null;
 
 export function getWebSocketService(baseUrl?: string, forceNew: boolean = false): DroneWebSocketService {
   if (!wsService || forceNew) {
+    // 优先使用 WebSocket URL，然后是 API URL，最后是默认值
+    const wsBaseUrl = baseUrl ||
+      import.meta.env.VITE_GLOB_WS_URL ||
+      import.meta.env.VITE_WS_URL ||
+      import.meta.env.VITE_GLOB_API_URL?.replace('/api', '') ||
+      import.meta.env.VITE_API_URL?.replace('/api', '') ||
+      'http://localhost:8080';
+
     wsService = new DroneWebSocketService(
-      baseUrl || import.meta.env.VITE_API_URL || 'http://localhost:8080',
+      wsBaseUrl,
       import.meta.env.DEV
     );
   }

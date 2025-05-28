@@ -11,6 +11,9 @@ import com.huang.backend.drone.dto.DroneTelemetryDto;
 import com.huang.backend.geofence.service.GeofenceService;
 import com.huang.backend.geofence.dto.GeofenceListItemDto;
 import com.huang.backend.geofence.entity.Geofence;
+import com.huang.backend.geofence.entity.GeofenceViolation;
+import com.huang.backend.geofence.repository.GeofenceRepository;
+import com.huang.backend.geofence.repository.GeofenceViolationRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.eclipse.paho.client.mqttv3.*;
@@ -19,6 +22,9 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
+import org.locationtech.jts.geom.Coordinate;
+import org.locationtech.jts.geom.GeometryFactory;
+import org.locationtech.jts.geom.Point;
 
 import java.time.Instant;
 import java.time.ZoneId;
@@ -29,6 +35,7 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.UUID;
 import java.util.List;
+import java.util.ArrayList;
 
 /**
  * MQTT Subscriber Service that listens for drone telemetry data
@@ -44,6 +51,9 @@ public class MqttSubscriberService implements MqttCallback {
     private final ObjectMapper objectMapper;
     private final DroneWebSocketHandler droneWebSocketHandler;
     private final GeofenceService geofenceService;
+    private final GeofenceRepository geofenceRepository;
+    private final GeofenceViolationRepository violationRepository;
+    private final GeometryFactory geometryFactory = new GeometryFactory();
 
     @Value("${mqtt.topics.telemetry:drones/+/telemetry}")
     private String telemetryTopic;
@@ -429,11 +439,13 @@ public class MqttSubscriberService implements MqttCallback {
                 boolean inNoFlyZone = false;
                 boolean inRestrictedZone = false;
                 String violationDetails = "";
+                List<UUID> violatedGeofenceIds = new ArrayList<>();
                 
                 for (GeofenceListItemDto geofence : containingGeofences) {
                     if ("NO_FLY_ZONE".equals(geofence.getGeofenceType())) {
                         inNoFlyZone = true;
                         violationDetails += "禁飞区: " + geofence.getName() + "; ";
+                        violatedGeofenceIds.add(geofence.getGeofenceId());
                         log.warn("无人机{}({})进入禁飞区: {}", drone.getSerialNumber(), droneId, geofence.getName());
                     } else if ("RESTRICTED_ZONE".equals(geofence.getGeofenceType())) {
                         // 检查无人机是否有权限进入此限制区
@@ -443,6 +455,7 @@ public class MqttSubscriberService implements MqttCallback {
                         if (!hasPermission) {
                             inRestrictedZone = true;
                             violationDetails += "未授权限制区: " + geofence.getName() + "; ";
+                            violatedGeofenceIds.add(geofence.getGeofenceId());
                             log.warn("无人机{}({})进入未授权限制区: {}", drone.getSerialNumber(), droneId, geofence.getName());
                         }
                     }
@@ -450,12 +463,16 @@ public class MqttSubscriberService implements MqttCallback {
                 
                 // 根据违规情况更新无人机状态
                 Drone.DroneStatus newStatus = null;
+                boolean isViolation = false;
+                
                 if (inNoFlyZone) {
                     newStatus = Drone.DroneStatus.GEOFENCE_VIOLATION;
+                    isViolation = true;
                     log.error("无人机{}({})违反禁飞区规定！位置: ({}, {})", 
                         drone.getSerialNumber(), droneId, telemetryData.getLatitude(), telemetryData.getLongitude());
                 } else if (inRestrictedZone) {
                     newStatus = Drone.DroneStatus.GEOFENCE_VIOLATION;
+                    isViolation = true;
                     log.error("无人机{}({})进入未授权限制区！位置: ({}, {})", 
                         drone.getSerialNumber(), droneId, telemetryData.getLatitude(), telemetryData.getLongitude());
                 } else if (drone.getCurrentStatus() == Drone.DroneStatus.GEOFENCE_VIOLATION) {
@@ -479,6 +496,15 @@ public class MqttSubscriberService implements MqttCallback {
                     }
                 }
                 
+                // 创建违规记录（如果是新的违规）
+                if (isViolation) {
+                    // 只有当无人机当前状态不是违规状态时，才创建新的违规记录
+                    // 这样可以避免在同一次违规中重复创建记录
+                    if (drone.getCurrentStatus() != Drone.DroneStatus.GEOFENCE_VIOLATION) {
+                        createViolationRecords(drone, violatedGeofenceIds, telemetryData, inNoFlyZone, inRestrictedZone);
+                    }
+                }
+                
             } else {
                 log.warn("检查禁飞区时未找到UUID为{}的无人机", droneId);
             }
@@ -486,6 +512,55 @@ public class MqttSubscriberService implements MqttCallback {
             log.error("检查禁飞区违规失败：无效的UUID格式: {}", droneId, e);
         } catch (Exception e) {
             log.error("检查禁飞区违规失败: {}", e.getMessage(), e);
+        }
+    }
+    
+    /**
+     * Create violation records for each violated geofence
+     */
+    private void createViolationRecords(Drone drone, List<UUID> violatedGeofenceIds, 
+                                      DroneTelemetryData telemetryData, boolean inNoFlyZone, boolean inRestrictedZone) {
+        try {
+            // Create violation point
+            Point violationPoint = geometryFactory.createPoint(
+                new Coordinate(telemetryData.getLongitude(), telemetryData.getLatitude()));
+            violationPoint.setSRID(4326);
+            
+            for (UUID geofenceId : violatedGeofenceIds) {
+                // Find the geofence entity
+                Optional<Geofence> geofenceOpt = geofenceRepository.findById(geofenceId);
+                if (geofenceOpt.isPresent()) {
+                    Geofence geofence = geofenceOpt.get();
+                    
+                    // Determine violation type and severity
+                    GeofenceViolation.ViolationType violationType = GeofenceViolation.ViolationType.ENTRY;
+                    GeofenceViolation.Severity severity = inNoFlyZone ? 
+                        GeofenceViolation.Severity.CRITICAL : GeofenceViolation.Severity.HIGH;
+                    
+                    // Create violation record
+                    GeofenceViolation violation = GeofenceViolation.builder()
+                        .violationId(UUID.randomUUID())
+                        .geofence(geofence)
+                        .drone(drone)
+                        .violationType(violationType)
+                        .violationPoint(violationPoint)
+                        .altitude(telemetryData.getAltitude())
+                        .violationTime(ZonedDateTime.ofInstant(telemetryData.getTimestamp(), ZoneId.systemDefault()))
+                        .severity(severity)
+                        .resolved(false)
+                        .build();
+                    
+                    // Save violation record
+                    violationRepository.save(violation);
+                    
+                    log.info("创建违规记录: 无人机{}({}) 违反地理围栏 {} ({})", 
+                        drone.getSerialNumber(), drone.getDroneId(), geofence.getName(), geofence.getGeofenceType());
+                } else {
+                    log.warn("创建违规记录时未找到地理围栏: {}", geofenceId);
+                }
+            }
+        } catch (Exception e) {
+            log.error("创建违规记录失败: {}", e.getMessage(), e);
         }
     }
 } 

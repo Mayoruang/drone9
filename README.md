@@ -157,6 +157,7 @@ docker-compose up -d postgres influxdb emqx
 ```bash
 cd backend
 ./mvnw spring-boot:run
+mvn spring-boot:run -Dspring-boot.run.profiles=network
 ```
 
 后端服务将在 `http://localhost:8080` 运行
