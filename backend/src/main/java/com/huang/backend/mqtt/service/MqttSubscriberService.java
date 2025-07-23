@@ -428,9 +428,12 @@ public class MqttSubscriberService implements MqttCallback {
             
             // droneId is now UUID from topic, not serial number
             UUID droneUuid = UUID.fromString(droneId);
-            Optional<Drone> droneOpt = droneRepository.findById(droneUuid);
+            Optional<Drone> droneOpt = droneRepository.findByIdWithGeofences(droneUuid);
             if (droneOpt.isPresent()) {
                 Drone drone = droneOpt.get();
+                
+                // 记录当前状态，用于后续比较
+                Drone.DroneStatus currentStatus = drone.getCurrentStatus();
                 
                 // 检查当前位置是否在任何地理围栏内
                 List<GeofenceListItemDto> containingGeofences = geofenceService.findGeofencesContainingPoint(
@@ -457,32 +460,39 @@ public class MqttSubscriberService implements MqttCallback {
                             violationDetails += "未授权限制区: " + geofence.getName() + "; ";
                             violatedGeofenceIds.add(geofence.getGeofenceId());
                             log.warn("无人机{}({})进入未授权限制区: {}", drone.getSerialNumber(), droneId, geofence.getName());
+                        } else {
+                            log.debug("无人机{}({})有权限进入限制区: {}", drone.getSerialNumber(), droneId, geofence.getName());
                         }
                     }
                 }
                 
-                // 根据违规情况更新无人机状态
+                // 根据违规情况确定新状态
                 Drone.DroneStatus newStatus = null;
-                boolean isViolation = false;
+                boolean isNewViolation = false;
                 
                 if (inNoFlyZone) {
                     newStatus = Drone.DroneStatus.GEOFENCE_VIOLATION;
-                    isViolation = true;
+                    isNewViolation = (currentStatus != Drone.DroneStatus.GEOFENCE_VIOLATION);
                     log.error("无人机{}({})违反禁飞区规定！位置: ({}, {})", 
                         drone.getSerialNumber(), droneId, telemetryData.getLatitude(), telemetryData.getLongitude());
                 } else if (inRestrictedZone) {
                     newStatus = Drone.DroneStatus.GEOFENCE_VIOLATION;
-                    isViolation = true;
+                    isNewViolation = (currentStatus != Drone.DroneStatus.GEOFENCE_VIOLATION);
                     log.error("无人机{}({})进入未授权限制区！位置: ({}, {})", 
                         drone.getSerialNumber(), droneId, telemetryData.getLatitude(), telemetryData.getLongitude());
-                } else if (drone.getCurrentStatus() == Drone.DroneStatus.GEOFENCE_VIOLATION) {
+                } else if (currentStatus == Drone.DroneStatus.GEOFENCE_VIOLATION) {
                     // 无人机已离开违规区域，恢复到正常飞行状态
                     newStatus = Drone.DroneStatus.FLYING;
                     log.info("无人机{}({})已离开违规区域，状态恢复为正常飞行", drone.getSerialNumber(), droneId);
                 }
                 
+                // 先创建违规记录（如果是新的违规），再更新状态
+                if (isNewViolation && !violatedGeofenceIds.isEmpty()) {
+                    createViolationRecords(drone, violatedGeofenceIds, telemetryData, inNoFlyZone, inRestrictedZone);
+                }
+                
                 // 更新状态（如果有变化）
-                if (newStatus != null && drone.getCurrentStatus() != newStatus) {
+                if (newStatus != null && currentStatus != newStatus) {
                     drone.setCurrentStatus(newStatus);
                     droneRepository.save(drone);
                     
@@ -493,15 +503,6 @@ public class MqttSubscriberService implements MqttCallback {
                     } else {
                         log.info("无人机{}({})状态已更新为: {}", 
                             drone.getSerialNumber(), droneId, newStatus);
-                    }
-                }
-                
-                // 创建违规记录（如果是新的违规）
-                if (isViolation) {
-                    // 只有当无人机当前状态不是违规状态时，才创建新的违规记录
-                    // 这样可以避免在同一次违规中重复创建记录
-                    if (drone.getCurrentStatus() != Drone.DroneStatus.GEOFENCE_VIOLATION) {
-                        createViolationRecords(drone, violatedGeofenceIds, telemetryData, inNoFlyZone, inRestrictedZone);
                     }
                 }
                 

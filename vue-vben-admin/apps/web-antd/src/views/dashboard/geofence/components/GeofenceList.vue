@@ -29,6 +29,7 @@ interface ExtendedGeofenceData extends GeofenceData {
   altitudeMax?: number;
   priority?: number;
   areaSquareMeters?: number;
+  droneCount?: number; // 关联的无人机数量（只对RESTRICTED_ZONE有效）
   center: [number, number]; // 中心点坐标 [lng, lat]
 }
 
@@ -472,11 +473,11 @@ const cancelDelete = () => {
                   <span>创建时间: {{ formatTime(geofence.createTime) }}</span>
                 </div>
                 <div
-                  v-if="geofence.droneIds && geofence.droneIds.length > 0"
+                  v-if="geofence.droneCount && geofence.droneCount > 0"
                   class="flex items-center"
                 >
                   <span class="mr-1">🚁</span>
-                  <span>关联无人机: {{ geofence.droneIds.length }} 台</span>
+                  <span>关联无人机: {{ geofence.droneCount }} 台</span>
                 </div>
               </div>
 
@@ -555,13 +556,13 @@ const cancelDelete = () => {
           </p>
           <p
             v-if="
-              deleteModal.geofence.droneIds &&
-              deleteModal.geofence.droneIds.length > 0
+              deleteModal.geofence.droneCount &&
+              deleteModal.geofence.droneCount > 0
             "
             class="mt-1 text-xs text-orange-600"
           >
             ⚠️ 此围栏关联了
-            {{ deleteModal.geofence.droneIds.length }}
+            {{ deleteModal.geofence.droneCount }}
             台无人机，删除后将解除关联
           </p>
         </div>
@@ -657,7 +658,7 @@ const cancelDelete = () => {
             {{ detailModal.geofence.priority }} 级
           </Descriptions.Item>
           <Descriptions.Item label="关联无人机">
-            {{ detailModal.geofence.droneIds?.length || 0 }} 台
+            {{ detailModal.geofence.droneCount || 0 }} 台
           </Descriptions.Item>
         </Descriptions>
 
@@ -713,8 +714,8 @@ const cancelDelete = () => {
         <!-- 关联无人机信息 -->
         <div
           v-if="
-            detailModal.geofence.droneIds &&
-            detailModal.geofence.droneIds.length > 0
+            detailModal.geofence.droneCount &&
+            detailModal.geofence.droneCount > 0
           "
           class="mb-6"
         >

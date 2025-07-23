@@ -502,16 +502,14 @@ export function formatFlightMode(mode: FlightMode): {
  * @returns 健康状态信息
  */
 export function calculateBatteryHealth(batteryLevel: number, batteryVoltage: number): {
-  level: 'good' | 'warning' | 'critical';
+  level: 'good' | 'critical';
   color: string;
   text: string;
 } {
-  if (batteryLevel < 20 || batteryVoltage < 3.3) {
-    return { level: 'critical', color: '#ff4d4f', text: '严重' };
-  } else if (batteryLevel < 40 || batteryVoltage < 3.6) {
-    return { level: 'warning', color: '#faad14', text: '警告' };
+  if (batteryLevel <= 20 || batteryVoltage < 3.3) {
+    return { level: 'critical', color: '#ff4d4f', text: '低电量警告' };
   } else {
-    return { level: 'good', color: '#52c41a', text: '良好' };
+    return { level: 'good', color: '#52c41a', text: '正常' };
   }
 }
 

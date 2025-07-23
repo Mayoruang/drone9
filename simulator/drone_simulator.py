@@ -288,16 +288,26 @@ def main():
                 log_info(f"🔧 型号: {args.model}")
                 
                 # 显示使用提示
+                # 从后端URL提取主机地址用于MQTT broker
+                backend_host = re.search(r'https?://([^:/]+)', args.backend_url)
+                mqtt_host = backend_host.group(1) if backend_host else "localhost"
+                
                 print("\n" + "="*60)
                 print("🚀 无人机注册完成！接下来的步骤:")
                 print("="*60)
                 print(f"1. 使用以下命令启动无人机模拟器:")
-                print(f"   python existing_drone_simulator.py -d {drone_id}")
-                print(f"\n2. 或者查看所有已注册的无人机:")
-                print(f"   python drone_simulator.py --list")
-                print(f"\n3. 或者查看模拟器帮助:")
+                print(f"   python existing_drone_simulator.py \\")
+                print(f"     --drone-id {drone_id} \\")
+                print(f"     --backend-url {args.backend_url} \\")
+                print(f"     --mqtt-host {mqtt_host}")
+                print(f"\n2. 简化命令:")
+                print(f"   python existing_drone_simulator.py -d {drone_id} -b {args.backend_url} -m {mqtt_host}")
+                print(f"\n3. 或者查看所有已注册的无人机:")
+                print(f"   python drone_simulator.py --backend-url {args.backend_url} --list")
+                print(f"\n4. 或者查看模拟器帮助:")
                 print(f"   python existing_drone_simulator.py --help")
                 print("\n💡 提示: 模拟器启动后，您可以通过前端控制面板发送命令控制无人机")
+                print("💡 注意: 如果运行在不同机器上，请确保网络连接和防火墙设置正确")
                 print("="*60)
                 
                 return 0

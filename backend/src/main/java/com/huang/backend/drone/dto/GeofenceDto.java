@@ -16,7 +16,7 @@ import java.util.UUID;
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
-public class GeofenceDTO {
+public class GeofenceDto {
     
     private UUID geofenceId;
     private String name;

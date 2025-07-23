@@ -63,6 +63,11 @@ public class GeofenceListItemDto {
      */
     private Double areaSquareMeters;
     
+    /**
+     * Number of associated drones (only applicable for RESTRICTED_ZONE)
+     */
+    private int droneCount;
+    
     private ZonedDateTime createdAt;
     private ZonedDateTime updatedAt;
 } 

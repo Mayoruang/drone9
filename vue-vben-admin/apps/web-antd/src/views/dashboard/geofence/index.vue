@@ -33,6 +33,7 @@ interface ExtendedGeofenceData extends GeofenceData {
   altitudeMax?: number;
   priority?: number;
   areaSquareMeters?: number;
+  droneCount?: number; // 关联的无人机数量（只对RESTRICTED_ZONE有效）
   center: [number, number];
 }
 
@@ -162,13 +163,14 @@ const loadGeofences = async () => {
           description: item.description,
           createTime: item.createdAt || item.createTime,
           thumbnail: item.thumbnailUrl || item.thumbnail,
-          droneIds: [],
+          droneIds: [], // 保留droneIds字段为空数组，用于兼容性
           active: item.active,
           // 新增字段
           altitudeMin: item.altitudeMin,
           altitudeMax: item.altitudeMax,
           priority: item.priority,
           areaSquareMeters: item.areaSquareMeters,
+          droneCount: item.droneCount || 0, // 使用后端返回的实际无人机数量
           // 添加center字段 - 使用后端提供的center或计算得出
           center: (() => {
             // 优先使用后端提供的center
@@ -456,6 +458,7 @@ const saveGeofence = async () => {
         altitudeMax: createData.altitudeMax,
         priority: 1,
         areaSquareMeters: undefined,
+        droneCount: 0, // 使用后端返回的实际无人机数量
         // 计算临时中心点（后端重新加载时会更新为准确值）
         center: (() => {
           const coords = createData.coordinates;

@@ -16,6 +16,9 @@ import org.springframework.stereotype.Component;
 import org.wololo.geojson.GeoJSON;
 import org.wololo.jts2geojson.GeoJSONReader;
 import org.wololo.jts2geojson.GeoJSONWriter;
+import org.springframework.beans.factory.annotation.Autowired;
+import jakarta.persistence.EntityManager;
+import jakarta.persistence.Query;
 
 import java.util.List;
 import java.util.Map;
@@ -32,6 +35,9 @@ public class GeofenceMapper {
     private final ObjectMapper objectMapper;
     private final GeometryFactory geometryFactory = new GeometryFactory(new PrecisionModel(), 4326);
     
+    @Autowired
+    private EntityManager entityManager;
+    
     /**
      * Convert a Geofence entity to a GeofenceListItemDto
      */
@@ -41,6 +47,16 @@ public class GeofenceMapper {
         try {
             double[] center = getCenterPoint(geofence.getGeom());
             Object geometry = geometryToGeoJson(geofence.getGeom());
+            
+            // 只有限制区才统计关联的无人机数量，使用单独的查询避免N+1问题
+            int droneCount = 0;
+            if (geofence.getGeofenceType() == Geofence.GeofenceType.RESTRICTED_ZONE) {
+                Query query = entityManager.createQuery(
+                    "SELECT COUNT(d) FROM Drone d JOIN d.geofences g WHERE g.geofenceId = :geofenceId");
+                query.setParameter("geofenceId", geofence.getGeofenceId());
+                Long count = (Long) query.getSingleResult();
+                droneCount = count != null ? count.intValue() : 0;
+            }
             
             return GeofenceListItemDto.builder()
                     .geofenceId(geofence.getGeofenceId())
@@ -55,6 +71,7 @@ public class GeofenceMapper {
                     .altitudeMax(geofence.getAltitudeMax())
                     .priority(geofence.getPriority())
                     .areaSquareMeters(geofence.getAreaSquareMeters())
+                    .droneCount(droneCount)
                     .createdAt(geofence.getCreatedAt())
                     .updatedAt(geofence.getUpdatedAt())
                     .build();

@@ -4,6 +4,7 @@
 已注册无人机模拟器
 用于模拟已经注册并获得MQTT凭据的无人机
 支持通过命令行参数指定要模拟的无人机ID
+支持状态持久化，可记住上次运行结束时的状态
 """
 
 import json
@@ -18,6 +19,8 @@ import requests
 import random
 import socket
 import paho.mqtt.client as mqtt
+import os
+from datetime import datetime, timezone
 
 def detect_backend_url():
     """自动检测可用的后端服务地址"""
@@ -67,6 +70,9 @@ class DroneSimulator:
     def __init__(self, drone_id, backend_url=None, mqtt_host=None):
         self.drone_id = drone_id
         
+        # 状态文件路径
+        self.state_file = f"drone_state_{self.drone_id}.json"
+        
         # 自动检测服务地址
         if backend_url is None:
             print("🔍 自动检测后端服务地址...")
@@ -102,24 +108,29 @@ class DroneSimulator:
             f"drones/{self.drone_id}/#"       # 通配符，订阅所有相关主题
         ]
         
-        # 生成沈阳市内随机初始位置
-        initial_lat, initial_lon = self.generate_random_shenyang_position()
-        
-        # 无人机状态
-        self.current_latitude = initial_lat
-        self.current_longitude = initial_lon
-        self.home_latitude = initial_lat  # 记录起飞点
-        self.home_longitude = initial_lon  # 记录起飞点
-        self.current_altitude = 0.0
-        self.current_battery = 95.0
-        self.current_status = "IDLE"
-        self.current_speed = 0.0
-        self.current_heading = 0.0
-        self.is_armed = False
-        self.target_altitude = None
-        self.target_latitude = None
-        self.target_longitude = None
-        self.flying = False
+        # 尝试恢复上次的状态，如果失败则生成初始状态
+        if not self.load_state():
+            print("📍 未找到保存的状态，生成新的初始状态")
+            # 生成沈阳市内随机初始位置
+            initial_lat, initial_lon = self.generate_random_shenyang_position()
+            
+            # 无人机状态
+            self.current_latitude = initial_lat
+            self.current_longitude = initial_lon
+            self.home_latitude = initial_lat  # 记录起飞点
+            self.home_longitude = initial_lon  # 记录起飞点
+            self.current_altitude = 0.0
+            self.current_battery = 95.0
+            self.current_status = "IDLE"
+            self.current_speed = 0.0
+            self.current_heading = 0.0
+            self.is_armed = False
+            self.target_altitude = None
+            self.target_latitude = None
+            self.target_longitude = None
+            self.flying = False
+            
+            print(f"📍 无人机初始位置: ({self.current_latitude:.6f}, {self.current_longitude:.6f})")
         
         # 控制变量
         self.mqtt_client = None
@@ -129,8 +140,6 @@ class DroneSimulator:
         # 设置信号处理
         signal.signal(signal.SIGINT, self.signal_handler)
         signal.signal(signal.SIGTERM, self.signal_handler)
-        
-        print(f"📍 无人机初始位置: ({self.current_latitude:.6f}, {self.current_longitude:.6f})")
 
     def generate_random_shenyang_position(self):
         """
@@ -178,6 +187,8 @@ class DroneSimulator:
 
     def signal_handler(self, sig, frame):
         print('\n正在关闭模拟器...')
+        print('💾 保存当前状态...')
+        self.save_state()
         self.stop_event.set()
         if self.mqtt_client:
             self.mqtt_client.disconnect()
@@ -777,8 +788,19 @@ class DroneSimulator:
             self.target_latitude = self.home_latitude
             self.target_longitude = self.home_longitude
             self.target_altitude = 0.0
-            self.current_status = "RETURNING_TO_LAUNCH"
+            self.current_status = "LOW_BATTERY"  # 设置为低电量状态
             self.current_speed = 2.0
+        elif self.current_battery <= 20.0 and self.current_status != "LOW_BATTERY":
+            # 地面低电量警告
+            print(f'   ⚠️ 电量过低 ({self.current_battery:.1f}%)，进入低电量警告状态')
+            self.current_status = "LOW_BATTERY"
+        elif self.current_battery > 20.0 and self.current_status == "LOW_BATTERY":
+            # 电量恢复正常
+            if self.is_airborne():
+                self.current_status = "HOVER"
+            else:
+                self.current_status = "IDLE"
+            print(f'   ✅ 电量恢复正常 ({self.current_battery:.1f}%)，状态已更新')
         
         print(f'   🔋 电池: {old_battery:.1f}% → {self.current_battery:.1f}%')
         print(f'🔄 模拟飞行步骤结束\n')
@@ -819,6 +841,7 @@ class DroneSimulator:
         print(f'🚁 启动已注册无人机模拟器')
         print(f'📋 序列号: {self.drone_info.get("serialNumber", "Unknown")}')
         print(f'🆔 UUID: {self.drone_id}')
+        print(f'💾 状态文件: {self.state_file}')
         print(f'📡 发布主题:')
         print(f'   • 遥测数据: {self.telemetry_topic}')
         print(f'   • 命令响应: {self.responses_topic}')
@@ -850,9 +873,14 @@ class DroneSimulator:
             telemetry_thread = threading.Thread(target=self.publish_telemetry, daemon=True)
             telemetry_thread.start()
             
+            # 启动自动保存状态线程
+            auto_save_thread = threading.Thread(target=self.auto_save_state, daemon=True)
+            auto_save_thread.start()
+            
             print('✅ 模拟器已启动，等待命令...')
-            print('📱 现在可以从前端发送控制台消息和自定义MQTT消息了！')
-            print('按 Ctrl+C 停止模拟器')
+            print('�� 现在可以从前端发送控制台消息和自定义MQTT消息了！')
+            print('💾 状态将每30秒自动保存一次')
+            print('按 Ctrl+C 停止模拟器并保存状态')
             
             # 主循环
             while not self.stop_event.is_set():
@@ -861,9 +889,99 @@ class DroneSimulator:
         except Exception as e:
             print(f'❌ 启动失败: {e}')
         finally:
+            print('💾 最终保存状态...')
+            self.save_state()
             if self.mqtt_client:
                 self.mqtt_client.disconnect()
             print('模拟器已关闭')
+
+    def load_state(self):
+        """从文件恢复无人机状态"""
+        try:
+            if not os.path.exists(self.state_file):
+                return False
+            
+            with open(self.state_file, 'r', encoding='utf-8') as f:
+                state_data = json.load(f)
+            
+            # 验证状态文件是否对应当前无人机
+            if state_data.get('drone_id') != self.drone_id:
+                print(f"⚠️ 状态文件中的无人机ID不匹配，忽略")
+                return False
+            
+            # 恢复状态
+            self.current_latitude = state_data.get('current_latitude', 0.0)
+            self.current_longitude = state_data.get('current_longitude', 0.0)
+            self.home_latitude = state_data.get('home_latitude', self.current_latitude)
+            self.home_longitude = state_data.get('home_longitude', self.current_longitude)
+            self.current_altitude = state_data.get('current_altitude', 0.0)
+            self.current_battery = state_data.get('current_battery', 95.0)
+            self.current_status = state_data.get('current_status', 'IDLE')
+            self.current_speed = state_data.get('current_speed', 0.0)
+            self.current_heading = state_data.get('current_heading', 0.0)
+            self.is_armed = state_data.get('is_armed', False)
+            self.target_altitude = state_data.get('target_altitude', None)
+            self.target_latitude = state_data.get('target_latitude', None)
+            self.target_longitude = state_data.get('target_longitude', None)
+            self.flying = state_data.get('flying', False)
+            
+            saved_at = state_data.get('saved_at', '未知时间')
+            print(f"🔄 已恢复状态 (保存于: {saved_at})")
+            print(f"📍 位置: ({self.current_latitude:.6f}, {self.current_longitude:.6f}, {self.current_altitude:.1f}m)")
+            print(f"🔋 电量: {self.current_battery:.1f}%")
+            print(f"🛰️ 状态: {self.current_status}")
+            print(f"⚙️ 解锁: {self.is_armed}")
+            
+            # 如果无人机在空中但状态异常，进行安全检查
+            if self.current_altitude > 0.5 and self.current_status == "IDLE":
+                print("⚠️ 检测到无人机在空中但状态为IDLE，自动修正为HOVER")
+                self.current_status = "HOVER"
+                self.is_armed = True
+            
+            return True
+            
+        except Exception as e:
+            print(f"❌ 恢复状态失败: {e}")
+            return False
+
+    def save_state(self):
+        """保存无人机当前状态到文件"""
+        try:
+            state_data = {
+                "saved_at": datetime.now(timezone.utc).isoformat(),
+                "drone_id": self.drone_id,
+                "current_latitude": self.current_latitude,
+                "current_longitude": self.current_longitude,
+                "home_latitude": self.home_latitude,
+                "home_longitude": self.home_longitude,
+                "current_altitude": self.current_altitude,
+                "current_battery": self.current_battery,
+                "current_status": self.current_status,
+                "current_speed": self.current_speed,
+                "current_heading": self.current_heading,
+                "is_armed": self.is_armed,
+                "target_altitude": self.target_altitude,
+                "target_latitude": self.target_latitude,
+                "target_longitude": self.target_longitude,
+                "flying": self.flying
+            }
+            
+            with open(self.state_file, 'w', encoding='utf-8') as f:
+                json.dump(state_data, f, ensure_ascii=False, indent=2)
+            
+            print(f"💾 状态已保存到: {self.state_file}")
+            return True
+            
+        except Exception as e:
+            print(f"❌ 保存状态失败: {e}")
+            return False
+
+    def auto_save_state(self):
+        """自动保存状态（定期保存）"""
+        while not self.stop_event.is_set():
+            time.sleep(30)  # 每30秒保存一次
+            if not self.stop_event.is_set():
+                self.save_state()
 
 def list_available_drones(backend_url):
     """列出系统中可用的无人机"""
@@ -890,7 +1008,7 @@ def list_available_drones(backend_url):
         print(f"❌ 获取无人机列表失败: {e}")
 
 def main():
-    parser = argparse.ArgumentParser(description='已注册无人机模拟器')
+    parser = argparse.ArgumentParser(description='已注册无人机模拟器 - 支持状态持久化')
     parser.add_argument('--drone-id', '-d', 
                        help='要模拟的无人机ID')
     parser.add_argument('--backend-url', '-b', 
@@ -900,6 +1018,10 @@ def main():
     parser.add_argument('--list', '-l', 
                        action='store_true',
                        help='列出系统中可用的无人机')
+    parser.add_argument('--clean-state', '-c',
+                       help='清理指定无人机的保存状态 (需要无人机ID)')
+    parser.add_argument('--show-state', '-s',
+                       help='显示指定无人机的保存状态 (需要无人机ID)')
     
     args = parser.parse_args()
     
@@ -912,13 +1034,59 @@ def main():
         list_available_drones(args.backend_url)
         return
     
+    # 清理状态功能
+    if args.clean_state:
+        state_file = f"drone_state_{args.clean_state}.json"
+        try:
+            if os.path.exists(state_file):
+                os.remove(state_file)
+                print(f"🗑️ 已删除无人机 {args.clean_state} 的状态文件: {state_file}")
+            else:
+                print(f"⚠️ 无人机 {args.clean_state} 的状态文件不存在: {state_file}")
+        except Exception as e:
+            print(f"❌ 删除状态文件失败: {e}")
+        return
+    
+    # 显示状态功能
+    if args.show_state:
+        state_file = f"drone_state_{args.show_state}.json"
+        try:
+            if os.path.exists(state_file):
+                with open(state_file, 'r', encoding='utf-8') as f:
+                    state_data = json.load(f)
+                
+                print(f"📊 无人机 {args.show_state} 的保存状态:")
+                print(f"   💾 保存时间: {state_data.get('saved_at', '未知')}")
+                print(f"   📍 位置: ({state_data.get('current_latitude', 0):.6f}, {state_data.get('current_longitude', 0):.6f})")
+                print(f"   🏠 起飞点: ({state_data.get('home_latitude', 0):.6f}, {state_data.get('home_longitude', 0):.6f})")
+                print(f"   ⬆️ 高度: {state_data.get('current_altitude', 0):.1f}m")
+                print(f"   🔋 电量: {state_data.get('current_battery', 0):.1f}%")
+                print(f"   🛰️ 状态: {state_data.get('current_status', 'Unknown')}")
+                print(f"   🚀 速度: {state_data.get('current_speed', 0):.1f}m/s")
+                print(f"   🧭 航向: {state_data.get('current_heading', 0):.1f}°")
+                print(f"   ⚙️ 解锁: {state_data.get('is_armed', False)}")
+                print(f"   🎯 目标高度: {state_data.get('target_altitude', 'None')}")
+                if state_data.get('target_latitude') and state_data.get('target_longitude'):
+                    print(f"   🎯 目标位置: ({state_data.get('target_latitude'):.6f}, {state_data.get('target_longitude'):.6f})")
+                else:
+                    print(f"   🎯 目标位置: None")
+            else:
+                print(f"⚠️ 无人机 {args.show_state} 的状态文件不存在: {state_file}")
+        except Exception as e:
+            print(f"❌ 读取状态文件失败: {e}")
+        return
+    
     if not args.drone_id:
         print("❌ 请指定要模拟的无人机ID")
         print("使用 --list 参数查看可用的无人机")
         print("使用 --drone-id <ID> 指定要模拟的无人机")
+        print("使用 --show-state <ID> 查看无人机的保存状态")
+        print("使用 --clean-state <ID> 清理无人机的保存状态")
         print("\n示例:")
         print("  python existing_drone_simulator.py --list")
         print("  python existing_drone_simulator.py --drone-id 3b1f02cd-a18d-4729-93b6-6134b116df74")
+        print("  python existing_drone_simulator.py --show-state 3b1f02cd-a18d-4729-93b6-6134b116df74")
+        print("  python existing_drone_simulator.py --clean-state 3b1f02cd-a18d-4729-93b6-6134b116df74")
         return
     
     # 创建并启动模拟器
