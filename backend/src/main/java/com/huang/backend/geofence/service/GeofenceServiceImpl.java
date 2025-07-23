@@ -94,7 +94,7 @@ public class GeofenceServiceImpl implements GeofenceService {
 
     @Override
     public Page<GeofenceListItemDto> searchGeofences(Geofence.GeofenceType type, Boolean active, String search, Pageable pageable) {
-        log.debug("Searching geofences with filters - type: {}, active: {}, search: {}", type, active, search);
+        log.debug("Searching geofences - type: {}, active: {}, search: {}", type, active, search);
         return geofenceRepository.searchGeofences(type, active, search, pageable)
                 .map(geofenceMapper::toListItemDto);
     }

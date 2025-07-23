@@ -6,6 +6,8 @@ import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
+import lombok.EqualsAndHashCode;
+import lombok.ToString;
 import org.locationtech.jts.geom.Point;
 import org.locationtech.jts.geom.Polygon;
 
@@ -20,6 +22,8 @@ import java.util.UUID;
 @Entity
 @Table(name = "geofences")
 @Data
+@EqualsAndHashCode(exclude = {"drones"})
+@ToString(exclude = {"drones"})
 @Builder
 @AllArgsConstructor
 @NoArgsConstructor

@@ -199,39 +199,54 @@ export const useDroneStore = defineStore('drone', () => {
       flightMode: telemetry.flightMode
     };
 
-    // 如果有状态信息，则直接使用
-    if (telemetry.status) {
-      updateData.status = telemetry.status;
+    // 状态优先级判断：低电量警告优先级最高（除了离线状态）
+    let finalStatus: DroneStatus | undefined;
+    
+    // 优先判断低电量状态
+    if (telemetry.batteryLevel !== undefined && telemetry.batteryLevel <= 20) {
+      finalStatus = 'LOW_BATTERY';
+    }
+    // 如果有状态信息且不是低电量，则直接使用
+    else if (telemetry.status) {
+      finalStatus = telemetry.status;
     }
     // 否则，根据遥测数据推断状态
     else if (drones.value[droneId]) {
       // 保持现有状态，除非有明确的条件需要改变
       const currentStatus = drones.value[droneId].status;
 
-      // 低电量警告
-      if (telemetry.flightMode === 'LOW_BATTERY' || telemetry.batteryLevel <= 20) {
-        updateData.status = 'LOW_BATTERY';
+      // flightMode状态判断
+      if (telemetry.flightMode === 'LOW_BATTERY') {
+        finalStatus = 'LOW_BATTERY';
       }
       // 轨迹异常或围栏突破警告
       else if (telemetry.flightMode === 'TRAJECTORY_ERROR' || telemetry.flightMode === 'FENCE_BREACH') {
-        updateData.status = 'TRAJECTORY_ERROR';
+        finalStatus = 'TRAJECTORY_ERROR';
+      }
+      // 禁飞区违规
+      else if (telemetry.flightMode === 'GEOFENCE_VIOLATION') {
+        finalStatus = 'GEOFENCE_VIOLATION';
       }
       // 离线状态
       else if (telemetry.flightMode === 'OFFLINE' || (telemetry.signalStrength !== undefined && telemetry.signalStrength < 30)) {
-        updateData.status = 'OFFLINE';
+        finalStatus = 'OFFLINE';
       }
       // 地面待命
       else if (telemetry.flightMode === 'IDLE') {
-        updateData.status = 'IDLE';
+        finalStatus = 'IDLE';
       }
       // 飞行状态
       else if (telemetry.flightMode === 'FLYING' || telemetry.flightMode === 'CRUISE' || telemetry.flightMode === 'HOVER') {
-        updateData.status = 'FLYING';
+        finalStatus = 'FLYING';
       }
       // 保持当前状态
       else {
-        updateData.status = currentStatus;
+        finalStatus = currentStatus;
       }
+    }
+    
+    if (finalStatus) {
+      updateData.status = finalStatus;
     }
 
     // 更新无人机数据

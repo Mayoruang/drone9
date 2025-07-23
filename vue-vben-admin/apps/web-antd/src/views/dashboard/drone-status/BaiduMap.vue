@@ -233,9 +233,8 @@ const createInfoWindow = (drone: DroneData) => {
   }[status as keyof typeof statusColors] || '未知';
   
   const getBatteryColor = (percentage: number) => {
-    if (percentage <= 20) return '#ff4d4f';
-    if (percentage <= 40) return '#faad14';
-    return '#52c41a';
+    if (percentage <= 20) return '#ff4d4f'; // 红色 - 低电量警告
+    return '#52c41a'; // 绿色 - 正常
   };
   
   // 使用卡片样式的信息窗口

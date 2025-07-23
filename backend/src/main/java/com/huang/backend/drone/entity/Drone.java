@@ -6,6 +6,8 @@ import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
+import lombok.EqualsAndHashCode;
+import lombok.ToString;
 
 import java.time.ZonedDateTime;
 import java.util.HashSet;
@@ -19,6 +21,8 @@ import java.util.UUID;
 @Entity
 @Table(name = "drones")
 @Data
+@EqualsAndHashCode(exclude = {"geofences"})
+@ToString(exclude = {"geofences"})
 @Builder
 @AllArgsConstructor
 @NoArgsConstructor

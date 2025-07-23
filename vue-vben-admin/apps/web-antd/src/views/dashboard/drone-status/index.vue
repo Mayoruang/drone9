@@ -225,9 +225,8 @@ const getStatusTag = (status: DroneStatus) => {
 
 // 获取电池颜色
 const getBatteryColor = (percentage: number) => {
-  if (percentage <= 20) return '#ff4d4f';
-  if (percentage <= 40) return '#faad14';
-  return '#52c41a';
+  if (percentage <= 20) return '#ff4d4f'; // 红色 - 低电量警告
+  return '#52c41a'; // 绿色 - 正常
 };
 
 // 活跃无人机列表 - 只显示真实数据
@@ -639,24 +638,34 @@ const handleDronePositionUpdate = (positions: TelemetryData[]) => {
       drone.lastHeartbeat = lastHeartbeat;
       if (data.flightMode) drone.flightMode = data.flightMode;
 
-      // 优先使用后端提供的状态
-      if (data.status) {
-        drone.status = data.status;
+      // 优先使用后端提供的状态，但要实现状态优先级
+      let finalStatus = data.status;
+      
+      // 状态优先级判断：低电量警告优先级最高（除了离线状态）
+      if (data.batteryLevel !== undefined && data.batteryLevel <= 20) {
+        finalStatus = 'LOW_BATTERY';
+        console.log(`🔋 无人机 ${droneId} 电量低于20% (${data.batteryLevel}%)，设置为低电量警告状态`);
       }
-      // 备选：根据电池电量和telemetry数据推断状态
-      else if (data.flightMode === 'LOW_BATTERY' || data.batteryLevel <= 20) {
-        drone.status = 'LOW_BATTERY';
+      // 如果不是低电量，使用后端提供的状态
+      else if (data.status) {
+        finalStatus = data.status;
+      }
+      // 备选：根据flightMode推断状态
+      else if (data.flightMode === 'LOW_BATTERY') {
+        finalStatus = 'LOW_BATTERY';
       } else if (data.flightMode === 'TRAJECTORY_ERROR') {
-        drone.status = 'TRAJECTORY_ERROR';
-      } else if (data.flightMode === 'FENCE_BREACH') {
-        drone.status = 'TRAJECTORY_ERROR'; // 使用轨迹异常状态表示围栏突破
+        finalStatus = 'TRAJECTORY_ERROR';
+      } else if (data.flightMode === 'FENCE_BREACH' || data.flightMode === 'GEOFENCE_VIOLATION') {
+        finalStatus = 'GEOFENCE_VIOLATION';
       } else if (data.flightMode === 'OFFLINE' || (data.signalStrength !== undefined && data.signalStrength < 30)) {
-        drone.status = 'OFFLINE';
+        finalStatus = 'OFFLINE';
       } else if (data.flightMode === 'IDLE') {
-        drone.status = 'IDLE';
+        finalStatus = 'IDLE';
       } else if (!drone.status) {
-        drone.status = 'FLYING';
+        finalStatus = 'FLYING';
       }
+      
+      drone.status = finalStatus;
     }
   });
 
