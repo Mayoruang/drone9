@@ -133,6 +133,28 @@ graph TB
 - **消息代理**: EMQX
 - **地图服务**: 百度地图静态API
 
+## 🖼️ 系统截图
+
+### 登录界面
+![登录页面](images/login-page.png)
+
+现代化的登录界面，支持多种登录方式，简洁美观的设计风格。
+
+### 无人机注册管理
+![无人机注册管理](images/drone-registration.png)
+
+管理员可以查看所有无人机注册申请，包括待审批、已注册和已拒绝的状态，支持一键审批操作。
+
+### 无人机状态监控
+![无人机状态监控](images/drone-status-monitor.png)
+
+实时地图显示无人机位置状态，支持多无人机同时监控，提供详细的位置信息和状态指标。
+
+### 地理围栏管理
+![地理围栏管理](images/geofence-list.png)
+
+可视化地理围栏创建和管理，支持在地图上绘制禁飞区、限制区等多种类型的围栏。
+
 ## 🚀 快速开始
 
 ### 环境要求
@@ -507,6 +529,28 @@ graph TB
 - **Database**: PostgreSQL, InfluxDB
 - **Message Broker**: EMQX
 - **Maps**: Baidu Maps Static API
+
+## 🖼️ System Screenshots
+
+### Login Interface
+![Login Page](images/login-page.png)
+
+Modern login interface with multiple authentication methods and clean, elegant design.
+
+### Drone Registration Management
+![Drone Registration](images/drone-registration.png)
+
+Administrators can view all drone registration requests, including pending, registered, and rejected statuses, with one-click approval operations.
+
+### Drone Status Monitoring
+![Drone Status Monitor](images/drone-status-monitor.png)
+
+Real-time map display of drone locations and status, supporting multi-drone monitoring with detailed position information and status metrics.
+
+### Geofence Management
+![Geofence Management](images/geofence-list.png)
+
+Visual geofence creation and management, supporting drawing of no-fly zones, restricted areas, and other types of boundaries on the map.
 
 ## 🚀 Quick Start
 
