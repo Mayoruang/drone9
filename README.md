@@ -393,7 +393,8 @@ python smart_drone_simulator.py \
 如需技术支持或有疑问：
 - **问题反馈**: [GitHub Issues](https://github.com/Mayoruang/drone9/issues)
 - **文档**: 参见 `/docs` 目录
-- **邮箱**: 联系系统管理员
+- **邮箱**: mayoruang@gmail.com/hmy991215@163.com
+  
 
 ---
 
@@ -789,7 +790,7 @@ This project is proprietary software. All rights reserved.
 For technical support or questions:
 - **Issues**: [GitHub Issues](https://github.com/Mayoruang/drone9/issues)
 - **Documentation**: See `/docs` directory
-- **Email**: Contact system administrators
+- **Email**: mayoruang@gmail.com/hmy991215@163.com
 
 ---
 
